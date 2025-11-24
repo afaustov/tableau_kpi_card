@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Easy KPI Cards</title>
+  <script src="https://extensions.tableauusercontent.com/resources/tableau.extensions.1.latest.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div id="app">
+    <div class="card">
+      <!-- Empty State -->
+      <div id="empty-state"
+        style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; color: #6b7280;">
+        <div style="margin-bottom: 12px;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20V10" />
+            <path d="M18 20V4" />
+            <path d="M6 20v-4" />
+          </svg>
+        </div>
+        <div style="font-weight: 500;">Select a Metric & Date</div>
+        <div style="font-size: 12px; margin-top: 4px;">Add fields to the extension to see data.</div>
+      </div>
+
+      <!-- Main Content (Hidden by default) -->
+      <div id="main-content" style="display: none; flex-direction: column; height: 100%; position: relative;">
+
+        <!-- Period Selector (Top Right) -->
+        <div style="position: absolute; top: 0; right: 0; z-index: 10;">
+          <select id="period-selector" class="period-selector-minimal">
+            <option value="mtd">MTD</option>
+            <option value="qtd">QTD</option>
+            <option value="ytd">YTD</option>
+            <option value="rolling_30">Rolling 30 Days</option>
+          </select>
+        </div>
+
+        <!-- KPI Cards Container -->
+        <div id="kpi-container" class="kpi-grid">
+          <!-- Cards will be injected here -->
+        </div>
+
+        <!-- Custom Tooltip -->
+        <div id="tooltip" class="custom-tooltip"></div>
+
+      </div>
+
+      <div id="debug-info"
+        style="font-size: 10px; color: red; display: none; position: absolute; bottom: 10px; left: 10px;"></div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>

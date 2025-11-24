@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest manifest-version="0.1" xmlns="http://www.tableau.com/xml/extension_manifest">
+  <worksheet-extension id="com.antigravity.kpi" extension-version="1.0.0">
+    <default-locale>en_US</default-locale>
+    <name resource-id="name"/>
+    <description>Create KPI Cards easily within minutes</description>
+    <author name="Alex Faustov" email="afaustov.x@gmail.com" organization="afaustov" website="https://example.com"/>
+    <min-api-version>1.13</min-api-version>
+    <source-location>
+      <url>https://afaustov.github.io/tableau_kpi_card/</url>
+    </source-location>
+    <icon></icon>
+    <permissions>
+      <permission>full data</permission>
+    </permissions>
+    <!-- Encodings define which fields the user can map in the extension UI -->
+    <encoding id="metric">
+      <display-name>Metrics</display-name>
+    </encoding>
+    <encoding id="date">
+      <display-name>Dates</display-name>
+    </encoding>
+    <encoding id="weight">
+      <display-name>Weights</display-name>
+    </encoding>
+  </worksheet-extension>
+  <resources>
+    <resource id="name">
+      <text locale="en_US">Easy KPI Cards</text>
+    </resource>
+  </resources>
+</manifest>
