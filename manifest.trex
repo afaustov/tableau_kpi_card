@@ -23,12 +23,6 @@
     <encoding id="weight">
       <display-name>Weights</display-name>
     </encoding>
-    <encoding id="rows">
-      <display-name>Rows</display-name>
-    </encoding>
-    <encoding id="columns">
-      <display-name>Columns</display-name>
-    </encoding>
   </worksheet-extension>
   <resources>
     <resource id="name">
