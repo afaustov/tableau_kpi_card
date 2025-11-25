@@ -222,14 +222,23 @@ async function refreshKPIs(worksheet) {
       if (dateFilter) {
         dateFieldName = dateFilter.fieldName;
         showDebug(`🔍 Date (Filter): ${dateFieldName}`);
+      } else {
+        showDebug(`⚠️ Filters checked: ${filters.map(f => `${f.fieldName} (${f.columnType})`).join(', ')}`);
       }
     }
     console.timeEnd('Get Encodings');
 
     if (!dateFieldName) {
       showDebug('⚠️ No Date field found');
-      document.getElementById('empty-state').style.display = 'flex';
+      const emptyState = document.getElementById('empty-state');
+      emptyState.style.display = 'flex';
       document.getElementById('main-content').style.display = 'none';
+
+      // Update empty state message if we have metrics but no date
+      if (metricFields.length > 0) {
+        emptyState.querySelector('div[style="font-weight: 500;"]').textContent = 'Missing Date Field';
+        emptyState.querySelector('div[style="font-size: 12px; margin-top: 4px;"]').textContent = 'Please drag a Date field to the "Dates" box in the Marks card.';
+      }
       return;
     }
 
@@ -746,6 +755,8 @@ function showDebug(message) {
   const debugDiv = document.getElementById('debug-info');
   if (debugDiv) {
     debugDiv.style.display = 'block';
+    debugDiv.style.zIndex = '99999';
+    debugDiv.style.background = 'rgba(255,255,255,0.8)';
     debugDiv.innerHTML += `<div>${message}</div>`;
   }
   console.log(message);
