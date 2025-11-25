@@ -227,8 +227,9 @@ async function refreshKPIs(worksheet) {
     // 4. Clear Filter
     await worksheet.clearFilterAsync(dateFieldName);
 
-    // 5. Process Results
-    state.metrics = metricFields.map(mName => {
+    // 5. Fetch Bar Chart Data for each metric
+    console.time('Fetch Bar Charts');
+    const metricsWithCharts = await Promise.all(metricFields.map(async (mName) => {
       const curObj = results.current?.[mName];
       const prevMObj = results.prevMonth?.[mName];
       const prevYObj = results.prevYear?.[mName];
@@ -239,15 +240,28 @@ async function refreshKPIs(worksheet) {
 
       const isPct = curObj?.fmt?.includes('%') || false;
 
+      // Fetch bar chart data using date as category
+      const barChartData = await fetchBarChartData(
+        worksheet,
+        dateFieldName,
+        mName,
+        periods.current
+      );
+
       return {
         name: mName,
         current: curVal,
         prevMonth: prevMVal,
         prevYear: prevYVal,
         isPercentage: isPct,
-        formattedValue: curObj?.fmt
+        formattedValue: curObj?.fmt,
+        barChartData: barChartData,
+        dateFieldName: dateFieldName
       };
-    });
+    }));
+    console.timeEnd('Fetch Bar Charts');
+
+    state.metrics = metricsWithCharts;
 
     renderKPIs(state.metrics);
     console.timeEnd('Total Refresh Time');
@@ -305,6 +319,10 @@ function renderKPIs(metrics) {
 
     const item = document.createElement('div');
     item.className = 'kpi-item';
+
+    // Create unique ID for this metric's chart
+    const chartId = `chart-${metric.name.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
     item.innerHTML = `
       <div class="big-value">${mainValue}</div>
       <div class="comparison-line">
@@ -312,6 +330,7 @@ function renderKPIs(metrics) {
         ${momHTML}
       </div>
       <div class="metric-subtitle" title="${subtitle}">${subtitle}</div>
+      <div id="${chartId}" class="kpi-chart" style="margin-top: 16px; height: 120px;"></div>
     `;
 
     // Attach event listeners directly to the item for better performance
@@ -320,6 +339,11 @@ function renderKPIs(metrics) {
     item.addEventListener('mouseleave', hideTooltip);
 
     container.appendChild(item);
+
+    // Render bar chart if data is available
+    if (metric.barChartData && metric.barChartData.length > 0) {
+      renderBarChart(chartId, metric.barChartData, metric.name, metric.dateFieldName);
+    }
   });
 }
 
@@ -358,7 +382,146 @@ function formatNumber(num, isPercentage = false) {
   return num.toFixed(0);
 }
 
-// -------------------- Date Helpers --------------------
+// -------------------- Bar Chart Functions --------------------
+async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
+  try {
+    console.log(`🔍 Fetching bar chart for ${metricField} by ${dateFieldName}`);
+
+    // 1. Apply MTD filter
+    await worksheet.applyRangeFilterAsync(dateFieldName, {
+      min: range.start,
+      max: range.end
+    });
+
+    // 2. Get summary data
+    const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+
+    // 3. Find column indices
+    const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
+    const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+
+    if (dateIndex === -1 || metricIndex === -1) {
+      console.warn(`⚠️ Could not find columns for bar chart: date=${dateIndex}, metric=${metricIndex}`);
+      return [];
+    }
+
+    // 4. Extract and group data by date
+    const dataMap = new Map();
+
+    summary.data.forEach(row => {
+      const dateValue = row[dateIndex].formattedValue || row[dateIndex].nativeValue;
+      const metricValue = row[metricIndex].nativeValue;
+
+      if (typeof metricValue === 'number') {
+        if (dataMap.has(dateValue)) {
+          dataMap.set(dateValue, dataMap.get(dateValue) + metricValue);
+        } else {
+          dataMap.set(dateValue, metricValue);
+        }
+      }
+    });
+
+    // Convert to array and sort by date
+    const chartData = Array.from(dataMap, ([date, value]) => ({ date, value }));
+    chartData.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // 5. Clear filter
+    await worksheet.clearFilterAsync(dateFieldName);
+
+    console.log(`📊 Bar chart data for ${metricField}:`, chartData.length, 'points');
+    return chartData;
+  } catch (e) {
+    console.error('❌ Error fetching bar chart data:', e);
+    return [];
+  }
+}
+
+function renderBarChart(containerId, data, metricName, dateFieldName) {
+  const container = document.getElementById(containerId);
+  if (!container || !data || data.length === 0) {
+    return;
+  }
+
+  // Clear previous content
+  container.innerHTML = '';
+
+  // Small chart dimensions
+  const margin = { top: 5, right: 5, bottom: 20, left: 5 };
+  const width = container.clientWidth || 250;
+  const height = 120 - margin.top - margin.bottom;
+
+  // Create SVG
+  const svg = d3.select(`#${containerId}`)
+    .append('svg')
+    .attr('width', width)
+    .attr('height', height + margin.top + margin.bottom)
+    .append('g')
+    .attr('transform', `translate(${margin.left},${margin.top})`);
+
+  // Scales
+  const x = d3.scaleBand()
+    .domain(data.map(d => d.date))
+    .range([0, width - margin.left - margin.right])
+    .padding(0.1);
+
+  const y = d3.scaleLinear()
+    .domain([0, d3.max(data, d => d.value)])
+    .nice()
+    .range([height, 0]);
+
+  // Bars
+  svg.selectAll('.mini-bar')
+    .data(data)
+    .enter()
+    .append('rect')
+    .attr('class', 'mini-bar')
+    .attr('x', d => x(d.date))
+    .attr('y', d => y(d.value))
+    .attr('width', x.bandwidth())
+    .attr('height', d => height - y(d.value))
+    .attr('fill', '#4f46e5')
+    .attr('opacity', 0.8)
+    .attr('rx', 2)
+    .on('mouseover', function (event, d) {
+      d3.select(this).attr('opacity', 1).attr('fill', '#6366f1');
+
+      // Show simple tooltip
+      const tooltip = document.createElement('div');
+      tooltip.style.cssText = 'position:fixed;background:rgba(0,0,0,0.8);color:white;padding:6px 10px;border-radius:4px;font-size:11px;pointer-events:none;z-index:10000;';
+      tooltip.textContent = `${d.date}: ${formatNumber(d.value)}`;
+      tooltip.style.left = event.pageX + 10 + 'px';
+      tooltip.style.top = event.pageY + 10 + 'px';
+      document.body.appendChild(tooltip);
+      this._tooltip = tooltip;
+    })
+    .on('mouseout', function () {
+      d3.select(this).attr('opacity', 0.8).attr('fill', '#4f46e5');
+      if (this._tooltip) {
+        this._tooltip.remove();
+        this._tooltip = null;
+      }
+    });
+
+  // X Axis (optional, simplified)
+  if (data.length <= 10) {
+    svg.append('g')
+      .attr('transform', `translate(0,${height})`)
+      .call(d3.axisBottom(x).tickSize(0))
+      .selectAll('text')
+      .attr('transform', 'rotate(-45)')
+      .style('text-anchor', 'end')
+      .style('font-size', '8px')
+      .style('font-family', 'Inter, sans-serif')
+      .text(d => {
+        // Shorten date labels
+        return d.length > 6 ? d.substring(0, 6) : d;
+      });
+
+    svg.select('.domain').remove();
+  }
+}
+
+// --------------------Date Helpers --------------------
 function getRange(period, anchorDate) {
   const year = anchorDate.getFullYear();
   const month = anchorDate.getMonth();
