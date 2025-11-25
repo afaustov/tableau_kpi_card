@@ -341,8 +341,17 @@ function renderKPIs(metrics) {
     container.appendChild(item);
 
     // Render bar chart if data is available
+    console.log(`🎨 Rendering chart for ${metric.name}:`, {
+      chartId,
+      hasData: !!metric.barChartData,
+      dataLength: metric.barChartData?.length,
+      data: metric.barChartData
+    });
+
     if (metric.barChartData && metric.barChartData.length > 0) {
       renderBarChart(chartId, metric.barChartData, metric.name, metric.dateFieldName);
+    } else {
+      console.warn(`⚠️ No bar chart data for ${metric.name}`);
     }
   });
 }
