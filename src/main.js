@@ -492,9 +492,9 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
         const metricVal = row[metricIndex].nativeValue;
 
         if (dateVal && typeof metricVal === 'number') {
-          // Normalize date to YYYY-MM-DD for grouping
+          // Normalize date to YYYY-MM-DD for grouping (use local time, not UTC)
           const date = new Date(dateVal);
-          const dateKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+          const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
           dailyDataMap.set(dateKey, (dailyDataMap.get(dateKey) || 0) + metricVal);
         }
@@ -503,12 +503,14 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
 
     // Build array with all days in range (including days with 0 value)
     const dataPoints = [];
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dateKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    const current = new Date(startDate);
+    while (current <= endDate) {
+      const dateKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
       dataPoints.push({
-        date: new Date(d),
+        date: new Date(current), // Create new date object for each day
         value: dailyDataMap.get(dateKey) || 0
       });
+      current.setDate(current.getDate() + 1);
     }
 
     await worksheet.clearFilterAsync(dateFieldName);
@@ -520,6 +522,7 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
     return [];
   }
 }
+
 
 function renderBarChart(elementId, currentData, referenceData, metricName, dateFieldName) {
   const container = document.getElementById(elementId);
