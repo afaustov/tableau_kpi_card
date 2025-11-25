@@ -343,10 +343,17 @@ function renderKPIs(metrics) {
       <div id="${chartId}" class="bar-chart-container" style="width: 100%; height: 60px; margin-top: 12px;"></div>
     `;
 
-    // Tooltip events
-    item.addEventListener('mouseenter', (e) => showTooltipForMetric(e, metric));
-    item.addEventListener('mouseleave', hideTooltip);
-    item.addEventListener('mousemove', (e) => showTooltipForMetric(e, metric));
+    // Tooltip events - ONLY on the big value
+    const bigValueEl = item.querySelector('.big-value');
+    if (bigValueEl) {
+      bigValueEl.style.cursor = 'help'; // Indicate hoverable
+      bigValueEl.addEventListener('mouseenter', (e) => showTooltipForMetric(e, metric));
+      bigValueEl.addEventListener('mouseleave', hideTooltip);
+      bigValueEl.addEventListener('mousemove', (e) => {
+        lastEvent = e;
+        updateTooltipPosition();
+      });
+    }
 
     container.appendChild(item);
 
@@ -407,9 +414,11 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
   const container = document.getElementById(elementId);
   if (!container) return;
 
+  container.innerHTML = ''; // Clear previous chart
+
   const width = container.clientWidth;
-  const height = 60; // Fixed height for sparkline
-  const margin = { top: 5, right: 0, bottom: 5, left: 0 };
+  const height = 80; // Increased height for labels
+  const margin = { top: 5, right: 0, bottom: 20, left: 0 };
 
   const svg = d3.select(container)
     .append('svg')
@@ -422,7 +431,7 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .range([margin.left, width - margin.right])
     .padding(0.2);
 
-  // Y scale (based on max of both datasets to keep scale consistent)
+  // Y scale
   const maxVal = Math.max(
     d3.max(currentData, d => d.value) || 0,
     d3.max(referenceData || [], d => d.value) || 0
@@ -432,19 +441,15 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .domain([0, maxVal])
     .range([height - margin.bottom, margin.top]);
 
-  // Draw Reference Bars (Gray)
+  // Draw Reference Bars (Gray) - Full Width
   if (referenceData && referenceData.length > 0) {
-    // We assume referenceData matches currentData by index (day 1 vs day 1)
-    // Or we should map by day index. For MTD, it's day 1 to day N.
-    // Let's assume they are aligned by day of month.
-
     svg.selectAll('.bar-ref')
-      .data(currentData) // Use currentData to drive x-axis
+      .data(currentData)
       .enter()
       .append('rect')
       .attr('class', 'bar-ref')
       .attr('x', d => x(d.date))
-      .attr('width', x.bandwidth() + 2) // Slightly wider for background effect
+      .attr('width', x.bandwidth()) // Full bandwidth
       .attr('y', (d, i) => {
         const refVal = referenceData[i]?.value || 0;
         return y(refVal);
@@ -453,23 +458,66 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
         const refVal = referenceData[i]?.value || 0;
         return y(0) - y(refVal);
       })
-      .attr('fill', '#cbd5e1') // Slate-300
-      .attr('transform', `translate(-1, 0)`); // Center the wider bar
+      .attr('fill', '#e2e8f0'); // Lighter gray (Slate-200)
   }
 
-  // Draw Current Bars (Conditional Color)
+  // Draw Current Bars (Conditional Color) - Half Width & Centered
   svg.selectAll('.bar-current')
     .data(currentData)
     .enter()
     .append('rect')
     .attr('class', 'bar-current')
-    .attr('x', d => x(d.date))
-    .attr('width', x.bandwidth())
+    .attr('x', d => x(d.date) + x.bandwidth() * 0.25) // Center: 25% offset
+    .attr('width', x.bandwidth() * 0.5) // 50% width
     .attr('y', d => y(d.value))
     .attr('height', d => y(0) - y(d.value))
     .attr('fill', (d, i) => {
       const refVal = referenceData?.[i]?.value || 0;
-      return d.value > refVal ? '#4f46e5' : '#d97706'; // Indigo-600 vs Amber-600
+      return d.value > refVal ? '#4f46e5' : '#d97706';
+    });
+
+  // Axis Labels (Start and End Date)
+  if (currentData.length > 0) {
+    const startDate = currentData[0].date;
+    const endDate = currentData[currentData.length - 1].date;
+    const formatDate = d3.timeFormat('%b %d');
+
+    svg.append('text')
+      .attr('x', 0)
+      .attr('y', height - 5)
+      .attr('font-size', '10px')
+      .attr('fill', '#9ca3af') // Gray-400
+      .text(formatDate(startDate));
+
+    svg.append('text')
+      .attr('x', width)
+      .attr('y', height - 5)
+      .attr('text-anchor', 'end')
+      .attr('font-size', '10px')
+      .attr('fill', '#9ca3af')
+      .text(formatDate(endDate));
+  }
+
+  // Overlay for Tooltips
+  svg.selectAll('.bar-overlay')
+    .data(currentData)
+    .enter()
+    .append('rect')
+    .attr('class', 'bar-overlay')
+    .attr('x', d => x(d.date))
+    .attr('width', x.bandwidth())
+    .attr('y', 0)
+    .attr('height', height - margin.bottom)
+    .attr('fill', 'transparent')
+    .on('mouseenter', (e, d) => {
+      const index = currentData.indexOf(d);
+      const refVal = referenceData ? referenceData[index]?.value : 0;
+      showTooltipForBar(e, d.date, d.value, refVal, metricName);
+    })
+    .on('mouseleave', hideTooltip)
+    .on('mousemove', (e) => {
+      lastEvent = e;
+      updateTooltipPosition();
     });
 }
 
@@ -634,4 +682,47 @@ function generateTooltipContent(metric) {
       <div class="tooltip-row"><span class="tooltip-label">Δ:</span><span class="tooltip-value ${yoyDiff >= 0 ? 'positive' : 'negative'}">${formatDelta(yoyDiff, yoyPct, metric.isPercentage)}</span></div>
     </div>
   `;
+}
+
+function showTooltipForBar(e, date, currentVal, refVal, metricName) {
+  tooltip.innerHTML = generateBarTooltipContent(date, currentVal, refVal, metricName);
+  tooltip.classList.remove('hidden');
+  lastEvent = e;
+  updateTooltipPosition();
+}
+
+function generateBarTooltipContent(date, currentVal, refVal, metricName) {
+  const diff = currentVal - refVal;
+  const pct = refVal ? (diff / refVal) * 100 : 0;
+  const formatDate = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  const triangle = diff >= 0 ? '▲' : '▼';
+  const sign = diff >= 0 ? '+' : '';
+  const colorClass = diff >= 0 ? 'positive' : 'negative';
+
+  return `
+        <div class="tooltip-header">${metricName}</div>
+        <div class="tooltip-section">
+            <div class="tooltip-row">
+                <span class="tooltip-label">Date:</span>
+                <span class="tooltip-value">${formatDate(date)}</span>
+            </div>
+             <div class="tooltip-divider"></div>
+            <div class="tooltip-row">
+                <span class="tooltip-label">Current:</span>
+                <span class="tooltip-value">${formatNumber(currentVal, false)}</span>
+            </div>
+            <div class="tooltip-row">
+                <span class="tooltip-label">Reference:</span>
+                <span class="tooltip-value">${formatNumber(refVal, false)}</span>
+            </div>
+             <div class="tooltip-divider"></div>
+            <div class="tooltip-row">
+                <span class="tooltip-label">Delta:</span>
+                <span class="tooltip-value ${colorClass}">
+                    ${triangle} ${sign}${formatNumber(Math.abs(diff), false)} (${sign}${pct.toFixed(1)}%)
+                </span>
+            </div>
+        </div>
+    `;
 }
