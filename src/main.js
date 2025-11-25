@@ -469,46 +469,80 @@ function renderKPIs(metrics) {
 
 async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
   try {
-    const dataPoints = [];
+    console.time(`⏱️ Fetch ${metricField} bar chart`);
     const startDate = new Date(range.start);
     const endDate = new Date(range.end);
 
-    // Iterate through each day in the range
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dayStart = new Date(d);
-      dayStart.setUTCHours(0, 0, 0, 0);
-      const dayEnd = new Date(d);
-      dayEnd.setUTCHours(23, 59, 59, 999);
+    const daysDiff = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    console.log(`📊 [${metricField}] Fetching bar chart data for ${daysDiff} days (${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]})`);
 
-      await worksheet.applyRangeFilterAsync(dateFieldName, {
-        min: dayStart,
-        max: dayEnd
-      });
+    // OPTIMIZED: Single API call for entire period instead of per-day
+    await worksheet.applyRangeFilterAsync(dateFieldName, {
+      min: startDate,
+      max: endDate
+    });
 
-      const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
-      const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
-      const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+    const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+    const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
+    const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
 
-      let dailyValue = 0;
-      if (metricIndex !== -1) {
-        summary.data.forEach(row => {
-          const val = row[metricIndex].nativeValue;
-          if (typeof val === 'number') dailyValue += val;
-        });
-      }
+    console.log(`📊 [${metricField}] Summary rows: ${summary.data.length}, dateCol index: ${dateIndex}, metricCol index: ${metricIndex}`);
 
-      dataPoints.push({
-        date: new Date(dayStart),
-        value: dailyValue
-      });
+    if (dateIndex === -1 || metricIndex === -1) {
+      console.warn(`⚠️ [${metricField}] Could not find columns - dateIndex: ${dateIndex}, metricIndex: ${metricIndex}`);
+      await worksheet.clearFilterAsync(dateFieldName);
+      return [];
     }
 
-    // Clear filter after loop
+    // Group data by date on client-side
+    const dailyDataMap = new Map();
+
+    for (const row of summary.data) {
+      const dateVal = row[dateIndex].nativeValue;
+      const metricVal = row[metricIndex].nativeValue;
+
+      if (dateVal && typeof metricVal === 'number') {
+        // Normalize to YYYY-MM-DD using local time
+        const date = new Date(dateVal);
+        const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+        dailyDataMap.set(dateKey, (dailyDataMap.get(dateKey) || 0) + metricVal);
+      }
+    }
+
+    console.log(`📊 [${metricField}] Grouped into ${dailyDataMap.size} unique dates`);
+    if (dailyDataMap.size > 0) {
+      const sampleKeys = Array.from(dailyDataMap.entries()).slice(0, 3);
+      console.log(`📊 [${metricField}] Sample data:`, sampleKeys.map(([k, v]) => `${k}: ${v.toFixed(1)}`).join(', '));
+    }
+
+    // Build array with all days in range (including days with 0 value)
+    const dataPoints = [];
+    const current = new Date(startDate);
+
+    while (current <= endDate) {
+      const dateKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+      const value = dailyDataMap.get(dateKey) || 0;
+
+      dataPoints.push({
+        date: new Date(current),
+        value: value
+      });
+
+      current.setDate(current.getDate() + 1);
+    }
+
+    console.log(`📊 [${metricField}] Generated ${dataPoints.length} data points`);
+    const nonZeroCount = dataPoints.filter(d => d.value > 0).length;
+    console.log(`📊 [${metricField}] Non-zero values: ${nonZeroCount}/${dataPoints.length}`);
+
     await worksheet.clearFilterAsync(dateFieldName);
+    console.timeEnd(`⏱️ Fetch ${metricField} bar chart`);
+
     return dataPoints;
 
   } catch (e) {
-    console.warn(`Error fetching chart data for ${metricField}:`, e);
+    console.error(`❌ Error fetching chart data for ${metricField}:`, e);
     return [];
   }
 }
