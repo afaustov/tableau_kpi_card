@@ -469,42 +469,50 @@ function renderKPIs(metrics) {
 
 async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
   try {
-    const dataPoints = [];
+    console.time(`Fetch Chart Data: ${metricField}`);
     const startDate = new Date(range.start);
     const endDate = new Date(range.end);
 
-    // Iterate through each day in the range
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dayStart = new Date(d);
-      dayStart.setUTCHours(0, 0, 0, 0);
-      const dayEnd = new Date(d);
-      dayEnd.setUTCHours(23, 59, 59, 999);
+    // OPTIMIZED: Single API call for entire period
+    await worksheet.applyRangeFilterAsync(dateFieldName, {
+      min: startDate,
+      max: endDate
+    });
 
-      await worksheet.applyRangeFilterAsync(dateFieldName, {
-        min: dayStart,
-        max: dayEnd
-      });
+    const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+    const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
+    const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
 
-      const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
-      const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
-      const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+    // Group data by date on client-side using Map for O(1) lookups
+    const dailyDataMap = new Map();
 
-      let dailyValue = 0;
-      if (metricIndex !== -1) {
-        summary.data.forEach(row => {
-          const val = row[metricIndex].nativeValue;
-          if (typeof val === 'number') dailyValue += val;
-        });
+    if (metricIndex !== -1 && dateIndex !== -1) {
+      for (const row of summary.data) {
+        const dateVal = row[dateIndex].nativeValue;
+        const metricVal = row[metricIndex].nativeValue;
+
+        if (dateVal && typeof metricVal === 'number') {
+          // Normalize date to YYYY-MM-DD for grouping
+          const date = new Date(dateVal);
+          const dateKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+
+          dailyDataMap.set(dateKey, (dailyDataMap.get(dateKey) || 0) + metricVal);
+        }
       }
+    }
 
+    // Build array with all days in range (including days with 0 value)
+    const dataPoints = [];
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dateKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
       dataPoints.push({
-        date: new Date(dayStart),
-        value: dailyValue
+        date: new Date(d),
+        value: dailyDataMap.get(dateKey) || 0
       });
     }
 
-    // Clear filter after loop
     await worksheet.clearFilterAsync(dateFieldName);
+    console.timeEnd(`Fetch Chart Data: ${metricField}`);
     return dataPoints;
 
   } catch (e) {
