@@ -394,52 +394,71 @@ function formatNumber(num, isPercentage = false) {
 // -------------------- Bar Chart Functions --------------------
 async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
   try {
-    console.log(`🔍 Fetching bar chart for ${metricField} by ${dateFieldName}`);
+    showDebug(`🔍 Chart: ${metricField}`);
+    console.log(`🔍 Fetching bar chart for ${metricField}`);
 
-    // 1. Apply MTD filter
-    await worksheet.applyRangeFilterAsync(dateFieldName, {
-      min: range.start,
-      max: range.end
-    });
+    // Generate list of dates in the MTD range
+    const dates = [];
+    const currentDate = new Date(range.start);
+    const endDate = new Date(range.end);
 
-    // 2. Get summary data
-    const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
-
-    // 3. Find column indices
-    const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
-    const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
-
-    if (dateIndex === -1 || metricIndex === -1) {
-      console.warn(`⚠️ Could not find columns for bar chart: date=${dateIndex}, metric=${metricIndex}`);
-      return [];
+    while (currentDate <= endDate) {
+      dates.push(new Date(currentDate));
+      currentDate.setUTCDate(currentDate.getUTCDate() + 1);
     }
 
-    // 4. Extract and group data by date
-    const dataMap = new Map();
+    showDebug(`  ${dates.length} dates to fetch`);
+    console.log(`  Will fetch ${dates.length} dates`);
 
-    summary.data.forEach(row => {
-      const dateValue = row[dateIndex].formattedValue || row[dateIndex].nativeValue;
-      const metricValue = row[metricIndex].nativeValue;
+    // Fetch data for each date
+    const chartData = [];
 
-      if (typeof metricValue === 'number') {
-        if (dataMap.has(dateValue)) {
-          dataMap.set(dateValue, dataMap.get(dateValue) + metricValue);
-        } else {
-          dataMap.set(dateValue, metricValue);
+    for (const date of dates) {
+      try {
+        // Apply filter for this specific date
+        const dayStart = new Date(date);
+        dayStart.setUTCHours(0, 0, 0, 0);
+        const dayEnd = new Date(date);
+        dayEnd.setUTCHours(23, 59, 59, 999);
+
+        await worksheet.applyRangeFilterAsync(dateFieldName, {
+          min: dayStart,
+          max: dayEnd
+        });
+
+        // Get summary data
+        const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+
+        // Find metric column
+        const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+
+        if (metricIndex !== -1 && summary.data.length > 0) {
+          // Sum all values for this date
+          let totalValue = 0;
+          summary.data.forEach(row => {
+            const val = row[metricIndex].nativeValue;
+            if (typeof val === 'number') {
+              totalValue += val;
+            }
+          });
+
+          // Format date for display
+          const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          chartData.push({ date: dateStr, value: totalValue });
         }
+      } catch (dateError) {
+        console.warn(`Error fetching data for date ${date}:`, dateError);
       }
-    });
+    }
 
-    // Convert to array and sort by date
-    const chartData = Array.from(dataMap, ([date, value]) => ({ date, value }));
-    chartData.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-    // 5. Clear filter
+    // Clear filter
     await worksheet.clearFilterAsync(dateFieldName);
 
-    console.log(`📊 Bar chart data for ${metricField}:`, chartData.length, 'points');
+    showDebug(`  ✅ ${chartData.length} points`);
+    console.log(`📊 Bar chart data for ${metricField}:`, chartData);
     return chartData;
   } catch (e) {
+    showDebug(`  ❌ Error: ${e.message}`);
     console.error('❌ Error fetching bar chart data:', e);
     return [];
   }
