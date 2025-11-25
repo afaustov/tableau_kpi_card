@@ -128,6 +128,8 @@ async function refreshKPIs(worksheet) {
 
     if (!dateFieldName) {
       showDebug('⚠️ No Date field found');
+      document.getElementById('empty-state').style.display = 'flex';
+      document.getElementById('main-content').style.display = 'none';
       return;
     }
 
@@ -148,11 +150,16 @@ async function refreshKPIs(worksheet) {
       } else {
         showDebug('⚠️ No Metrics found. Checked Spec and Summary.');
         showDebug(`Cols: ${summary.columns.map(c => c.fieldName).join(', ')}`);
+        document.getElementById('empty-state').style.display = 'flex';
+        document.getElementById('main-content').style.display = 'none';
         return;
       }
     }
 
     // 2. Define Periods
+    document.getElementById('empty-state').style.display = 'none';
+    document.getElementById('main-content').style.display = 'flex';
+
     const anchorDate = new Date();
     const periods = {
       current: getRange(state.selectedPeriod, anchorDate),
