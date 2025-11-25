@@ -301,20 +301,46 @@ function renderKPIs(metrics) {
     const momDiff = metric.current - metric.prevMonth;
     const momPct = metric.prevMonth ? (momDiff / metric.prevMonth) * 100 : 0;
 
+    const yoyDiff = metric.current - metric.prevYear;
+    const yoyPct = metric.prevYear ? (yoyDiff / metric.prevYear) * 100 : 0;
+
     const chartId = `chart-${metric.name.replace(/\s+/g, '-')}`;
 
+    // Helper for trend class
+    const getTrendClass = (val) => val >= 0 ? 'trend-up' : 'trend-down';
+    const formatDelta = (val, isPct) => {
+      const sign = val >= 0 ? '+' : '';
+      return isPct ? `${sign}${val.toFixed(1)}%` : `${sign}${formatNumber(Math.abs(val), false)}`;
+    };
+
     item.innerHTML = `
-      <div class="kpi-header">
-        <div class="kpi-title">${metric.name}</div>
-        <div class="kpi-value">${formatNumber(metric.current, metric.isPercentage)}</div>
+      <div class="big-value">${formatNumber(metric.current, metric.isPercentage)}</div>
+      
+      <div class="comparison-line">
+        <div class="comp-item" title="Year over Year">
+          <span class="comp-label">YoY:</span>
+          <span class="comp-val ${getTrendClass(yoyDiff)}">
+            ${yoyDiff >= 0 ? '▲' : '▼'} ${Math.abs(yoyPct).toFixed(1)}%
+          </span>
+          <span class="comp-val ${getTrendClass(yoyDiff)}" style="font-size: 0.9em; opacity: 0.8;">
+             ${formatDelta(yoyDiff, metric.isPercentage)}
+          </span>
+        </div>
+        <div class="comp-divider">|</div>
+        <div class="comp-item" title="Month over Month">
+          <span class="comp-label">MoM:</span>
+          <span class="comp-val ${getTrendClass(momDiff)}">
+            ${momDiff >= 0 ? '▲' : '▼'} ${Math.abs(momPct).toFixed(1)}%
+          </span>
+           <span class="comp-val ${getTrendClass(momDiff)}" style="font-size: 0.9em; opacity: 0.8;">
+             ${formatDelta(momDiff, metric.isPercentage)}
+          </span>
+        </div>
       </div>
-      <div class="kpi-comparison">
-        <span class="${momDiff >= 0 ? 'positive' : 'negative'}">
-          ${momDiff >= 0 ? '▲' : '▼'} ${Math.abs(momPct).toFixed(1)}%
-        </span>
-        <span class="text-muted">vs prev month</span>
-      </div>
-      <div id="${chartId}" class="bar-chart-container"></div>
+
+      <div class="metric-subtitle">${metric.name} ${state.selectedPeriod.toUpperCase()}</div>
+      
+      <div id="${chartId}" class="bar-chart-container" style="width: 100%; height: 60px; margin-top: 12px;"></div>
     `;
 
     // Tooltip events
