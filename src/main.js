@@ -8,7 +8,8 @@ let state = {
   isCalculating: false,
   isApplyingOwnFilters: false,
   unregisterDataHandler: null,
-  handleDataChange: null
+  handleDataChange: null,
+  lastStateHash: null // Hash to detect real changes
 };
 
 // -------------------- Initialization --------------------
@@ -24,6 +25,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // UI listeners
     document.getElementById('period-selector').addEventListener('change', e => {
       state.selectedPeriod = e.target.value;
+      // Reset hash to ensure refresh happens
+      state.lastStateHash = null;
       refreshKPIs(worksheet);
     });
 
@@ -32,16 +35,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Listen for data changes with debounce and filter check
     let resizeTimer;
-    const handleDataChange = () => {
+    const handleDataChange = async () => {
       // Ignore events triggered by our own filter changes
       if (state.isApplyingOwnFilters) {
         return;
       }
 
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
+      resizeTimer = setTimeout(async () => {
         if (!state.isApplyingOwnFilters) {
-          refreshKPIs(worksheet);
+          // Check if there are real changes before refreshing
+          const hasChanges = await checkForChanges(worksheet);
+          if (hasChanges) {
+            console.log('🔄 Changes detected, refreshing KPIs...');
+            await refreshKPIs(worksheet);
+          } else {
+            console.log('⏭️ No changes detected, skipping refresh');
+          }
         }
       }, 1000); // Longer debounce to avoid rapid refreshes
     };
@@ -73,9 +83,99 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('Initialization failed:', err);
     showDebug('Init Error: ' + err.message);
   }
-});
+})
 
 // -------------------- Core Logic --------------------
+
+// Check if there are real changes in the data that require a refresh
+async function checkForChanges(worksheet) {
+  try {
+    const currentStateHash = await computeStateHash(worksheet);
+
+    console.log('🔍 Current State Hash:', currentStateHash);
+    console.log('🔍 Previous State Hash:', state.lastStateHash);
+
+    // First load - always refresh
+    if (state.lastStateHash === null) {
+      state.lastStateHash = currentStateHash;
+      return true;
+    }
+
+    // Compare with previous state
+    const hasChanges = currentStateHash !== state.lastStateHash;
+    if (hasChanges) {
+      console.log('✅ State changed!');
+      state.lastStateHash = currentStateHash;
+    } else {
+      console.log('⏭️ State unchanged');
+    }
+
+    return hasChanges;
+  } catch (e) {
+    console.error('Error checking for changes:', e);
+    // If we can't check, assume there are changes to be safe
+    return true;
+  }
+}
+
+
+// Compute a hash of the current state (metrics, encodings, filters)
+async function computeStateHash(worksheet) {
+  let hashParts = [];
+
+  try {
+    // 1. Get encodings (metrics and date fields)
+    if (typeof worksheet.getVisualSpecificationAsync === 'function') {
+      const spec = await worksheet.getVisualSpecificationAsync();
+      const encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
+
+      // Extract metric and date fields
+      const metricFields = encodings
+        .filter(e => e.id === 'metric')
+        .map(e => e.field?.name || e.field || e.fieldName)
+        .filter(Boolean)
+        .sort();
+
+      const dateFields = encodings
+        .filter(e => e.id === 'date')
+        .map(e => e.field?.name || e.field || e.fieldName)
+        .filter(Boolean)
+        .sort();
+
+      hashParts.push(`metrics:${metricFields.join(',')}`);
+      hashParts.push(`dates:${dateFields.join(',')}`);
+    }
+
+    // 2. Get active filters
+    const filters = await worksheet.getFiltersAsync();
+    const filterHash = filters
+      .map(f => {
+        let filterStr = `${f.fieldName}:${f.filterType}`;
+
+        // Add filter values/ranges for more precise detection
+        if (f.filterType === 'range' && f.minValue !== undefined && f.maxValue !== undefined) {
+          filterStr += `:${f.minValue}-${f.maxValue}`;
+        } else if (f.appliedValues) {
+          filterStr += `:${f.appliedValues.map(v => v.value).sort().join(',')}`;
+        }
+
+        return filterStr;
+      })
+      .sort()
+      .join('|');
+
+    hashParts.push(`filters:${filterHash}`);
+
+    // 3. Add selected period
+    hashParts.push(`period:${state.selectedPeriod}`);
+
+    return hashParts.join('::');
+  } catch (e) {
+    console.error('Error computing state hash:', e);
+    return Date.now().toString(); // Fallback to always refresh on error
+  }
+}
+
 async function refreshKPIs(worksheet) {
   if (state.isCalculating) return;
   state.isCalculating = true;
@@ -271,6 +371,9 @@ async function refreshKPIs(worksheet) {
     console.timeEnd('Fetch Bar Charts');
 
     renderKPIs(metricsWithCharts);
+
+    // Update state hash after successful refresh
+    state.lastStateHash = await computeStateHash(worksheet);
 
   } catch (e) {
     console.error('Refresh Error:', e);
