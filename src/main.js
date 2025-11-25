@@ -92,6 +92,8 @@ async function refreshKPIs(worksheet) {
     console.time('Get Encodings');
     let metricFields = [];
     let dateFieldName = null;
+    let rowFields = [];
+    let columnFields = [];
 
     if (typeof worksheet.getVisualSpecificationAsync === 'function') {
       const spec = await worksheet.getVisualSpecificationAsync();
@@ -105,6 +107,17 @@ async function refreshKPIs(worksheet) {
       metricFields = getFieldNames('metric');
       const dateFields = getFieldNames('date');
       dateFieldName = dateFields[0] || null;
+
+      // Read from rows and columns encodings
+      rowFields = getFieldNames('rows');
+      columnFields = getFieldNames('columns');
+
+      console.log('📊 Encodings detected:', {
+        metrics: metricFields,
+        date: dateFieldName,
+        rows: rowFields,
+        columns: columnFields
+      });
     }
 
     if (!dateFieldName) {
