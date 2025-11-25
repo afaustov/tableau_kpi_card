@@ -423,7 +423,7 @@ function renderKPIs(metrics, showSkeleton = false) {
              ${formatDelta(yoyDiff, metric.isPercentage)}
           </span>
         </div>
-        <div class="comp-divider">|</div>
+        
         <div class="comp-item" title="Month over Month">
           <span class="comp-label">MoM:</span>
           <span class="comp-val ${getTrendClass(momDiff)}">
@@ -438,7 +438,7 @@ function renderKPIs(metrics, showSkeleton = false) {
 
       <div class="metric-subtitle">${metric.name} ${state.selectedPeriod.toUpperCase()}</div>
       
-      <div id="${chartId}" class="bar-chart-container" style="width: 100%; height: 60px; margin-top: 12px;"></div>
+      <div id="${chartId}" class="bar-chart-container" style="width: 100%; flex: 1; min-height: 100px; margin-top: 12px; display: flex; align-items: flex-end;"></div>
     `;
 
     // Tooltip events - ONLY on the big value
@@ -575,7 +575,7 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
   container.innerHTML = ''; // Clear previous chart
 
   const width = container.clientWidth;
-  const height = 80; // Increased height for labels
+  const height = container.clientHeight || 150; // Use container height or fallback
   const margin = { top: 5, right: 0, bottom: 20, left: 0 };
 
   const svg = d3.select(container)
