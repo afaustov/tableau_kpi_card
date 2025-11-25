@@ -409,6 +409,7 @@ function renderKPIs(metrics, showSkeleton = false) {
           <span class="comp-val ${getTrendClass(yoyDiff)}">
             ${yoyDiff >= 0 ? '▲' : '▼'} ${Math.abs(yoyPct).toFixed(1)}%
           </span>
+          <span class="comp-divider">|</span>
           <span class="comp-val ${getTrendClass(yoyDiff)}" style="font-size: 0.9em; opacity: 0.8;">
              ${formatDelta(yoyDiff, metric.isPercentage)}
           </span>
@@ -419,6 +420,7 @@ function renderKPIs(metrics, showSkeleton = false) {
           <span class="comp-val ${getTrendClass(momDiff)}">
             ${momDiff >= 0 ? '▲' : '▼'} ${Math.abs(momPct).toFixed(1)}%
           </span>
+          <span class="comp-divider">|</span>
            <span class="comp-val ${getTrendClass(momDiff)}" style="font-size: 0.9em; opacity: 0.8;">
              ${formatDelta(momDiff, metric.isPercentage)}
           </span>
@@ -448,7 +450,7 @@ function renderKPIs(metrics, showSkeleton = false) {
     if (showSkeleton) {
       renderSkeletonChart(chartId);
     } else if (metric.barChartDataCurrent && metric.barChartDataCurrent.length > 0) {
-      renderBarChart(chartId, metric.barChartDataCurrent, metric.barChartDataReference, metric.name, metric.dateFieldName);
+      renderBarChart(chartId, metric.barChartDataCurrent, metric.barChartDataReference, metric.name, metric.dateFieldName, metric.isPercentage);
     }
   });
 }
@@ -500,7 +502,7 @@ async function loadBarChartsAsync(worksheet, dateFieldName, metrics, periods) {
       // Replace skeleton with real chart
       const chartId = `chart-${metric.name.replace(/\s+/g, '-')}`;
       if (barChartDataCurrent && barChartDataCurrent.length > 0) {
-        renderBarChart(chartId, barChartDataCurrent, barChartDataReference, metric.name, dateFieldName);
+        renderBarChart(chartId, barChartDataCurrent, barChartDataReference, metric.name, dateFieldName, metric.isPercentage);
         console.log(`✅ Chart loaded for ${metric.name}`);
       }
     } catch (e) {
@@ -557,7 +559,7 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
   }
 }
 
-function renderBarChart(elementId, currentData, referenceData, metricName, dateFieldName) {
+function renderBarChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage) {
   const container = document.getElementById(elementId);
   if (!container) return;
 
@@ -659,9 +661,30 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .on('mouseenter', (e, d) => {
       const index = currentData.indexOf(d);
       const refVal = referenceData ? referenceData[index]?.value : 0;
-      showTooltipForBar(e, d.date, d.value, refVal, metricName);
+      showTooltipForBar(e, d.date, d.value, refVal, metricName, isPercentage);
+
+      // Highlight effect
+      const chartContainer = document.getElementById(elementId);
+      const bars = chartContainer.querySelectorAll('.bar-current');
+      bars.forEach((bar, i) => {
+        if (i === index) {
+          bar.classList.add('active');
+          bar.classList.remove('inactive');
+        } else {
+          bar.classList.add('inactive');
+          bar.classList.remove('active');
+        }
+      });
     })
-    .on('mouseleave', hideTooltip)
+    .on('mouseleave', () => {
+      hideTooltip();
+      const chartContainer = document.getElementById(elementId);
+      const bars = chartContainer.querySelectorAll('.bar-current');
+      bars.forEach(bar => {
+        bar.classList.remove('active');
+        bar.classList.remove('inactive');
+      });
+    })
     .on('mousemove', (e) => {
       lastEvent = e;
       updateTooltipPosition();
@@ -831,14 +854,14 @@ function generateTooltipContent(metric) {
   `;
 }
 
-function showTooltipForBar(e, date, currentVal, refVal, metricName) {
-  tooltip.innerHTML = generateBarTooltipContent(date, currentVal, refVal, metricName);
+function showTooltipForBar(e, date, currentVal, refVal, metricName, isPercentage) {
+  tooltip.innerHTML = generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage);
   tooltip.classList.remove('hidden');
   lastEvent = e;
   updateTooltipPosition();
 }
 
-function generateBarTooltipContent(date, currentVal, refVal, metricName) {
+function generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage) {
   const diff = currentVal - refVal;
   const pct = refVal ? (diff / refVal) * 100 : 0;
   const formatDate = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -846,6 +869,9 @@ function generateBarTooltipContent(date, currentVal, refVal, metricName) {
   const triangle = diff >= 0 ? '▲' : '▼';
   const sign = diff >= 0 ? '+' : '';
   const colorClass = diff >= 0 ? 'positive' : 'negative';
+
+  const deltaValue = isPercentage ? `${sign}${(diff * 100).toFixed(1)} pp` : `${sign}${formatNumber(Math.abs(diff), false)}`;
+  const pctStr = `${sign}${pct.toFixed(1)}%`;
 
   return `
         <div class="tooltip-header">${metricName}</div>
@@ -857,17 +883,17 @@ function generateBarTooltipContent(date, currentVal, refVal, metricName) {
              <div class="tooltip-divider"></div>
             <div class="tooltip-row">
                 <span class="tooltip-label">Current:</span>
-                <span class="tooltip-value">${formatNumber(currentVal, false)}</span>
+                <span class="tooltip-value">${formatNumber(currentVal, isPercentage)}</span>
             </div>
             <div class="tooltip-row">
                 <span class="tooltip-label">Reference:</span>
-                <span class="tooltip-value">${formatNumber(refVal, false)}</span>
+                <span class="tooltip-value">${formatNumber(refVal, isPercentage)}</span>
             </div>
              <div class="tooltip-divider"></div>
             <div class="tooltip-row">
-                <span class="tooltip-label">Delta:</span>
+                <span class="tooltip-label">Δ:</span>
                 <span class="tooltip-value ${colorClass}">
-                    ${triangle} ${sign}${formatNumber(Math.abs(diff), false)} (${sign}${pct.toFixed(1)}%)
+                    ${triangle} ${pctStr} <span class="tooltip-divider">|</span> ${deltaValue}
                 </span>
             </div>
         </div>
