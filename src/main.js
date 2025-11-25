@@ -100,6 +100,9 @@ async function refreshKPIs(worksheet) {
       const spec = await worksheet.getVisualSpecificationAsync();
       const encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
 
+      console.log('🔍 Raw Encodings:', JSON.stringify(encodings, null, 2));
+      showDebug(`🔍 Encodings: ${encodings.length} found`);
+
       const getFieldNames = id =>
         encodings.filter(e => e.id === id)
           .map(e => e.field?.name || e.field || e.fieldName)
@@ -108,6 +111,9 @@ async function refreshKPIs(worksheet) {
       metricFields = getFieldNames('metric');
       const dateFields = getFieldNames('date');
       dateFieldName = dateFields[0] || null;
+
+      showDebug(`🔍 Metrics (Spec): ${metricFields.join(', ')}`);
+      showDebug(`🔍 Date (Spec): ${dateFieldName}`);
     }
 
     if (!dateFieldName) {
@@ -115,6 +121,7 @@ async function refreshKPIs(worksheet) {
       const dateFilter = filters.find(f => f.columnType === 'continuous-date' || f.columnType === 'discrete-date' || f.fieldName.toLowerCase().includes('date'));
       if (dateFilter) {
         dateFieldName = dateFilter.fieldName;
+        showDebug(`🔍 Date (Filter): ${dateFieldName}`);
       }
     }
     console.timeEnd('Get Encodings');
@@ -127,6 +134,9 @@ async function refreshKPIs(worksheet) {
     if (metricFields.length === 0) {
       // Fallback: Try to guess metrics from summary data columns if visual spec failed
       const summary = await worksheet.getSummaryDataAsync({ maxRows: 1 });
+      console.log('🔍 Summary Columns:', summary.columns.map(c => c.fieldName));
+      showDebug(`🔍 Summary Cols: ${summary.columns.length}`);
+
       const potentialMetrics = summary.columns
         .filter(c => c.dataType === 'float' || c.dataType === 'integer')
         .map(c => c.fieldName)
@@ -136,7 +146,8 @@ async function refreshKPIs(worksheet) {
         metricFields = potentialMetrics;
         showDebug(`⚠️ Using fallback metrics: ${metricFields.join(', ')}`);
       } else {
-        showDebug('⚠️ No Metrics found');
+        showDebug('⚠️ No Metrics found. Checked Spec and Summary.');
+        showDebug(`Cols: ${summary.columns.map(c => c.fieldName).join(', ')}`);
         return;
       }
     }
