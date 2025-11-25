@@ -487,7 +487,7 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
       max: endDate
     });
 
-    const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+    const summary = await worksheet.getUnderlyingDataAsync({ ignoreSelection: true });
     const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
     const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
 
