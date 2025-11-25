@@ -330,30 +330,13 @@ async function refreshKPIs(worksheet) {
     // 4. Clear Filter
     await worksheet.clearFilterAsync(dateFieldName);
 
-    // 5. Fetch Bar Chart Data for each metric
-    console.time('Fetch Bar Charts');
-    const metricsWithCharts = await Promise.all(metricFields.map(async (mName) => {
+    // 5. Prepare metrics data (without charts for now - lazy loading)
+    const metricsData = metricFields.map((mName) => {
       const curObj = results.current?.[mName];
       const prevMObj = results.prevMonth?.[mName];
 
       const curVal = curObj?.val || 0;
       const refVal = prevMObj?.val || 0;
-
-      // Fetch bar chart data for current period (MTD)
-      const barChartDataCurrent = await fetchBarChartData(
-        worksheet,
-        dateFieldName,
-        mName,
-        periods.current
-      );
-
-      // Fetch bar chart data for reference period (previous month)
-      const barChartDataReference = await fetchBarChartData(
-        worksheet,
-        dateFieldName,
-        mName,
-        periods.prevMonth
-      );
 
       return {
         name: mName,
@@ -363,14 +346,15 @@ async function refreshKPIs(worksheet) {
         prevYear: results.prevYear?.[mName]?.val || 0,
         isPercentage: curObj?.fmt?.includes('%') ?? false,
         formattedValue: curObj?.fmt,
-        barChartDataCurrent,
-        barChartDataReference,
         dateFieldName
       };
-    }));
-    console.timeEnd('Fetch Bar Charts');
+    });
 
-    renderKPIs(metricsWithCharts);
+    // Render KPIs immediately with skeleton charts
+    renderKPIs(metricsData, true); // true = show skeleton
+
+    // Lazy load bar charts in background
+    loadBarChartsAsync(worksheet, dateFieldName, metricsData, periods);
 
     // Update state hash after successful refresh
     state.lastStateHash = await computeStateHash(worksheet);
@@ -392,7 +376,7 @@ async function refreshKPIs(worksheet) {
   }
 }
 
-function renderKPIs(metrics) {
+function renderKPIs(metrics, showSkeleton = false) {
   const container = document.getElementById('kpi-container');
   container.innerHTML = '';
 
@@ -460,11 +444,71 @@ function renderKPIs(metrics) {
 
     container.appendChild(item);
 
-    // Render bar chart
-    if (metric.barChartDataCurrent && metric.barChartDataCurrent.length > 0) {
+    // Show skeleton or real chart
+    if (showSkeleton) {
+      renderSkeletonChart(chartId);
+    } else if (metric.barChartDataCurrent && metric.barChartDataCurrent.length > 0) {
       renderBarChart(chartId, metric.barChartDataCurrent, metric.barChartDataReference, metric.name, metric.dateFieldName);
     }
   });
+}
+
+// Render skeleton loading animation
+function renderSkeletonChart(elementId) {
+  const container = document.getElementById(elementId);
+  if (!container) return;
+
+  // Generate 20-25 random bars
+  const barCount = 20 + Math.floor(Math.random() * 6);
+  const bars = [];
+
+  for (let i = 0; i < barCount; i++) {
+    // Random height between 20% and 100%
+    const height = 20 + Math.random() * 80;
+    // Add slight delay to each bar's animation for wave effect
+    const delay = (i * 0.05).toFixed(2);
+    bars.push(`<div class="skeleton-bar" style="height: ${height}%; animation-delay: ${delay}s"></div>`);
+  }
+
+  container.innerHTML = `<div class="skeleton-chart">${bars.join('')}</div>`;
+}
+
+// Lazy load bar charts in background
+async function loadBarChartsAsync(worksheet, dateFieldName, metrics, periods) {
+  console.time('⏱️ Load Bar Charts (Async)');
+
+  for (const metric of metrics) {
+    try {
+      console.log(`📊 Loading chart for ${metric.name}...`);
+
+      // Fetch bar chart data for current period
+      const barChartDataCurrent = await fetchBarChartData(
+        worksheet,
+        dateFieldName,
+        metric.name,
+        periods.current
+      );
+
+      // Fetch bar chart data for reference period
+      const barChartDataReference = await fetchBarChartData(
+        worksheet,
+        dateFieldName,
+        metric.name,
+        periods.prevMonth
+      );
+
+      // Replace skeleton with real chart
+      const chartId = `chart-${metric.name.replace(/\s+/g, '-')}`;
+      if (barChartDataCurrent && barChartDataCurrent.length > 0) {
+        renderBarChart(chartId, barChartDataCurrent, barChartDataReference, metric.name, dateFieldName);
+        console.log(`✅ Chart loaded for ${metric.name}`);
+      }
+    } catch (e) {
+      console.error(`❌ Failed to load chart for ${metric.name}:`, e);
+    }
+  }
+
+  console.timeEnd('⏱️ Load Bar Charts (Async)');
 }
 
 async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
