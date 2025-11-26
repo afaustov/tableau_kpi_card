@@ -604,7 +604,7 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .attr('width', '100%') // Responsive width
     .attr('height', '100%') // Responsive height
     .attr('viewBox', `0 0 ${width} ${height}`) // Scale content
-    .attr('preserveAspectRatio', 'none'); // Stretch to fill
+    .attr('preserveAspectRatio', 'xMidYMid meet'); // Preserve aspect, don't stretch text
 
   // X scale
   const x = d3.scaleBand()
@@ -656,10 +656,9 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       const refVal = referenceData?.[i]?.value || 0;
       return d.value > refVal ? '#4f46e5' : '#d97706';
     })
-    .transition() // Add entrance animation
-    .duration(600)
-    .delay((d, i) => i * 30) // Simple staggered delay
-    .ease(d3.easeQuadOut) // Smooth, professional ease
+    .transition() // Simplified entrance animation
+    .duration(400) // Shorter duration for better FPS
+    .ease(d3.easeQuadOut) // Smooth ease
     .attr('y', d => y(d.value))
     .attr('height', d => y(0) - y(d.value));
 
