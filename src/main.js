@@ -549,39 +549,40 @@ function renderSkeletonChart(elementId) {
   container.innerHTML = `<div class="skeleton-chart">${bars.join('')}</div>`;
 }
 
-// Render skeleton loading animation for line chart
-function renderSkeletonLineChart(elementId) {
-  const container = document.getElementById(elementId);
-  if (!container) return;
 
-  const width = container.clientWidth;
-  const height = container.clientHeight || 150;
+for (const card of cards) {
+  try {
+    console.log(`📊 Loading ${card.chartType} chart for ${card.name}...`);
 
-  // Create SVG for skeleton line
-  const svg = `
-    <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="skeleton-gradient-${elementId}" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="#f0f0f0">
-            <animate attributeName="stop-color" values="#f0f0f0; #e0e0e0; #f0f0f0" dur="1.5s" repeatCount="indefinite" />
-          </stop>
-          <stop offset="50%" stop-color="#e0e0e0">
-             <animate attributeName="stop-color" values="#e0e0e0; #f0f0f0; #e0e0e0" dur="1.5s" repeatCount="indefinite" />
-          </stop>
-          <stop offset="100%" stop-color="#f0f0f0">
-             <animate attributeName="stop-color" values="#f0f0f0; #e0e0e0; #f0f0f0" dur="1.5s" repeatCount="indefinite" />
-          </stop>
-        </linearGradient>
-      </defs>
-      <path d="M0,${height} Q${width / 4},${height / 2} ${width / 2},${height * 0.8} T${width},${height * 0.2}" 
-            fill="none" 
-            stroke="url(#skeleton-gradient-${elementId})" 
-            stroke-width="4" 
-            stroke-linecap="round" />
-    </svg>
-  `;
+    // Fetch chart data for current period
+    const chartDataCurrent = await fetchBarChartData(
+      worksheet,
+      dateFieldName,
+      card.name,
+      periods.current
+    );
 
-  container.innerHTML = `<div class="skeleton-chart" style="display:block">${svg}</div>`;
+    // Fetch chart data for reference period
+    const chartDataReference = await fetchBarChartData(
+      worksheet,
+      dateFieldName,
+      card.name,
+      periods.prevMonth
+    );
+
+    // Replace skeleton with real chart
+    const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
+    if (chartDataCurrent && chartDataCurrent.length > 0) {
+      if (card.chartType === 'line') {
+        renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+      } else {
+        renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+      }
+      console.log(`✅ ${card.chartType} chart loaded for ${card.name}`);
+    }
+  } catch (e) {
+    console.error(`❌ Failed to load chart for ${card.name}:`, e);
+  }
 }
 
 // Lazy load charts (bars and lines) in background
@@ -829,10 +830,12 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
   if (!container) return;
 
   container.innerHTML = '';
+  container.style.overflow = 'hidden'; // Fix overflow issues
 
   const width = container.clientWidth;
   const height = container.clientHeight || 150;
-  const margin = { top: 5, right: 0, bottom: 20, left: 0 };
+  // Increase margins to prevent cutoff
+  const margin = { top: 10, right: 10, bottom: 20, left: 10 };
 
   const svg = d3.select(container)
     .append('svg')
@@ -841,30 +844,56 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .attr('viewBox', `0 0 ${width} ${height}`)
     .attr('preserveAspectRatio', 'xMidYMid meet');
 
+  // Define gradients
+  const defs = svg.append('defs');
+  const gradientId = `area-gradient-${elementId}`;
+  const gradient = defs.append('linearGradient')
+    .attr('id', gradientId)
+    .attr('x1', '0%')
+    .attr('y1', '0%')
+    .attr('x2', '0%')
+    .attr('y2', '100%');
+
+  gradient.append('stop')
+    .attr('offset', '0%')
+    .attr('stop-color', '#4f46e5') // Indigo-600
+    .attr('stop-opacity', 0.2);
+
+  gradient.append('stop')
+    .attr('offset', '100%')
+    .attr('stop-color', '#4f46e5')
+    .attr('stop-opacity', 0);
+
   // X scale (time)
   const x = d3.scaleTime()
     .domain([d3.min(currentData, d => d.date), d3.max(currentData, d => d.date)])
     .range([margin.left, width - margin.right]);
 
-  // Y scale
+  // Y scale - add 10% padding on top
   const maxVal = Math.max(
     d3.max(currentData, d => d.value) || 0,
     d3.max(referenceData || [], d => d.value) || 0
   );
 
   const y = d3.scaleLinear()
-    .domain([0, maxVal])
+    .domain([0, maxVal * 1.1])
     .range([height - margin.bottom, margin.top]);
 
-  // Line generator for current data
+  // Line generator
   const line = d3.line()
     .x(d => x(d.date))
     .y(d => y(d.value))
     .curve(d3.curveMonotoneX);
 
-  // Draw reference line (gray) - use same X positions as current data
+  // Area generator
+  const area = d3.area()
+    .x(d => x(d.date))
+    .y0(height - margin.bottom)
+    .y1(d => y(d.value))
+    .curve(d3.curveMonotoneX);
+
+  // Draw reference line (subtle gray)
   if (referenceData && referenceData.length > 0) {
-    // Map reference values to current dates for proper alignment
     const referenceLineData = currentData.map((d, i) => ({
       date: d.date,
       value: referenceData[i]?.value || 0
@@ -873,29 +902,24 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     svg.append('path')
       .datum(referenceLineData)
       .attr('fill', 'none')
-      .attr('stroke', '#cbd5e1')
-      .attr('stroke-width', 2)
-      .attr('stroke-dasharray', '4,3')
+      .attr('stroke', '#cbd5e1') // Slate-300
+      .attr('stroke-width', 1.5)
+      .attr('stroke-dasharray', '4,4')
       .attr('d', line);
-
-    // Reference dots
-    svg.selectAll('.dot-ref')
-      .data(referenceLineData)
-      .enter()
-      .append('circle')
-      .attr('class', 'dot-ref')
-      .attr('cx', d => x(d.date))
-      .attr('cy', d => y(d.value))
-      .attr('r', 2)
-      .attr('fill', '#cbd5e1');
   }
 
-  // Draw current period line (dark blue)
+  // Draw Area
+  svg.append('path')
+    .datum(currentData)
+    .attr('fill', `url(#${gradientId})`)
+    .attr('d', area);
+
+  // Draw current period line
   const currentPath = svg.append('path')
     .datum(currentData)
     .attr('fill', 'none')
-    .attr('stroke', '#1e40af')
-    .attr('stroke-width', 2.5)
+    .attr('stroke', '#4f46e5') // Indigo-600
+    .attr('stroke-width', 2)
     .attr('d', line);
 
   // Animate line drawing
@@ -908,33 +932,27 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .ease(d3.easeQuadOut)
     .attr('stroke-dashoffset', 0);
 
-  // Current dots
-  svg.selectAll('.dot-current')
-    .data(currentData)
-    .enter()
-    .append('circle')
-    .attr('class', 'dot-current')
-    .attr('cx', d => x(d.date))
-    .attr('cy', d => y(d.value))
-    .attr('r', 0)
-    .attr('fill', '#1e40af')
-    .transition()
-    .duration(400)
-    .delay((d, i) => 800 + i * 15)
-    .attr('r', 3);
+  // Hover Dot (initially hidden)
+  const hoverDot = svg.append('circle')
+    .attr('r', 4)
+    .attr('fill', '#4f46e5')
+    .attr('stroke', '#fff')
+    .attr('stroke-width', 2)
+    .style('opacity', 0)
+    .style('pointer-events', 'none');
 
   // Axis labels
   if (currentData.length > 0) {
     const formatDate = d3.timeFormat('%b %d');
     svg.append('text')
-      .attr('x', 0)
+      .attr('x', margin.left)
       .attr('y', height - 5)
       .attr('font-size', '10px')
       .attr('fill', '#9ca3af')
       .text(formatDate(currentData[0].date));
 
     svg.append('text')
-      .attr('x', width)
+      .attr('x', width - margin.right)
       .attr('y', height - 5)
       .attr('text-anchor', 'end')
       .attr('font-size', '10px')
@@ -946,18 +964,28 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
   svg.selectAll('.line-overlay')
     .data(currentData)
     .enter()
-    .append('circle')
-    .attr('cx', d => x(d.date))
-    .attr('cy', d => y(d.value))
-    .attr('r', 8)
+    .append('rect') // Use rects for better hit area
+    .attr('x', d => x(d.date) - (width / currentData.length) / 2)
+    .attr('y', 0)
+    .attr('width', width / currentData.length)
+    .attr('height', height)
     .attr('fill', 'transparent')
     .attr('cursor', 'pointer')
     .on('mouseenter', (e, d) => {
       const index = currentData.indexOf(d);
       const refVal = referenceData ? referenceData[index]?.value : 0;
       showTooltipForBar(e, d.date, d.value, refVal, metricName, isPercentage, isUnfavorable);
+
+      // Show and move hover dot
+      hoverDot
+        .attr('cx', x(d.date))
+        .attr('cy', y(d.value))
+        .style('opacity', 1);
     })
-    .on('mouseleave', hideTooltip)
+    .on('mouseleave', () => {
+      hideTooltip();
+      hoverDot.style('opacity', 0);
+    })
     .on('mousemove', (e) => {
       lastEvent = e;
       updateTooltipPosition();
