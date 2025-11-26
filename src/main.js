@@ -514,7 +514,11 @@ function renderKPIs(metrics, showSkeleton = false) {
 
     // Show skeleton or real chart based on chartType
     if (showSkeleton) {
-      renderSkeletonChart(chartId);
+      if (metric.chartType === 'line') {
+        renderSkeletonLineChart(chartId);
+      } else {
+        renderSkeletonChart(chartId);
+      }
     } else if (metric.chartDataCurrent && metric.chartDataCurrent.length > 0) {
       if (metric.chartType === 'line') {
         renderLineChart(chartId, metric.chartDataCurrent, metric.chartDataReference, metric.name, metric.dateFieldName, metric.isPercentage, metric.isUnfavorable);
@@ -543,6 +547,41 @@ function renderSkeletonChart(elementId) {
   }
 
   container.innerHTML = `<div class="skeleton-chart">${bars.join('')}</div>`;
+}
+
+// Render skeleton loading animation for line chart
+function renderSkeletonLineChart(elementId) {
+  const container = document.getElementById(elementId);
+  if (!container) return;
+
+  const width = container.clientWidth;
+  const height = container.clientHeight || 150;
+
+  // Create SVG for skeleton line
+  const svg = `
+    <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="skeleton-gradient-${elementId}" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#f0f0f0">
+            <animate attributeName="stop-color" values="#f0f0f0; #e0e0e0; #f0f0f0" dur="1.5s" repeatCount="indefinite" />
+          </stop>
+          <stop offset="50%" stop-color="#e0e0e0">
+             <animate attributeName="stop-color" values="#e0e0e0; #f0f0f0; #e0e0e0" dur="1.5s" repeatCount="indefinite" />
+          </stop>
+          <stop offset="100%" stop-color="#f0f0f0">
+             <animate attributeName="stop-color" values="#f0f0f0; #e0e0e0; #f0f0f0" dur="1.5s" repeatCount="indefinite" />
+          </stop>
+        </linearGradient>
+      </defs>
+      <path d="M0,${height} Q${width / 4},${height / 2} ${width / 2},${height * 0.8} T${width},${height * 0.2}" 
+            fill="none" 
+            stroke="url(#skeleton-gradient-${elementId})" 
+            stroke-width="4" 
+            stroke-linecap="round" />
+    </svg>
+  `;
+
+  container.innerHTML = `<div class="skeleton-chart" style="display:block">${svg}</div>`;
 }
 
 // Lazy load charts (bars and lines) in background
@@ -763,7 +802,7 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .on('mouseenter', (e, d) => {
       const index = currentData.indexOf(d);
       const refVal = referenceData ? referenceData[index]?.value : 0;
-      showTooltipForBar(e, d.date, d.value, refVal, metricName, isPercentage);
+      showTooltipForBar(e, d.date, d.value, refVal, metricName, isPercentage, isUnfavorable);
 
       // Highlight effect - stroke
       const chartContainer = document.getElementById(elementId);
@@ -817,20 +856,38 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .domain([0, maxVal])
     .range([height - margin.bottom, margin.top]);
 
-  // Line generator
+  // Line generator for current data
   const line = d3.line()
     .x(d => x(d.date))
     .y(d => y(d.value))
     .curve(d3.curveMonotoneX);
 
-  // Draw reference line (gray)
+  // Draw reference line (gray) - use same X positions as current data
   if (referenceData && referenceData.length > 0) {
+    // Map reference values to current dates for proper alignment
+    const referenceLineData = currentData.map((d, i) => ({
+      date: d.date,
+      value: referenceData[i]?.value || 0
+    }));
+
     svg.append('path')
-      .datum(referenceData)
+      .datum(referenceLineData)
       .attr('fill', 'none')
-      .attr('stroke', '#e2e8f0')
+      .attr('stroke', '#cbd5e1')
       .attr('stroke-width', 2)
+      .attr('stroke-dasharray', '4,3')
       .attr('d', line);
+
+    // Reference dots
+    svg.selectAll('.dot-ref')
+      .data(referenceLineData)
+      .enter()
+      .append('circle')
+      .attr('class', 'dot-ref')
+      .attr('cx', d => x(d.date))
+      .attr('cy', d => y(d.value))
+      .attr('r', 2)
+      .attr('fill', '#cbd5e1');
   }
 
   // Draw current period line (dark blue)
@@ -898,7 +955,7 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .on('mouseenter', (e, d) => {
       const index = currentData.indexOf(d);
       const refVal = referenceData ? referenceData[index]?.value : 0;
-      showTooltipForBar(e, d.date, d.value, refVal, metricName, isPercentage);
+      showTooltipForBar(e, d.date, d.value, refVal, metricName, isPercentage, isUnfavorable);
     })
     .on('mouseleave', hideTooltip)
     .on('mousemove', (e) => {
@@ -1049,6 +1106,14 @@ function generateTooltipContent(metric) {
     return `${triangle} ${pctStr} <span class="tooltip-divider">|</span> ${deltaValue}`;
   };
 
+  // Helper for color class
+  const getColorClass = (diff) => {
+    if (metric.isUnfavorable) {
+      return diff >= 0 ? 'negative' : 'positive';
+    }
+    return diff >= 0 ? 'positive' : 'negative';
+  };
+
   return `
     <div class="tooltip-header">${metric.name}</div>
     <div class="tooltip-section">
@@ -1060,33 +1125,36 @@ function generateTooltipContent(metric) {
       <div class="tooltip-comparison-header">vs Previous Month</div>
       <div class="tooltip-row"><span class="tooltip-label">Period:</span><span class="tooltip-value">${formatDate(prevMonthRange.start)} - ${formatDate(prevMonthRange.end)}</span></div>
       <div class="tooltip-row"><span class="tooltip-label">Value:</span><span class="tooltip-value">${formatNumber(metric.prevMonth, metric.isPercentage)}</span></div>
-      <div class="tooltip-row"><span class="tooltip-label">Δ:</span><span class="tooltip-value ${momDiff >= 0 ? 'positive' : 'negative'}">${formatDelta(momDiff, momPct, metric.isPercentage)}</span></div>
+      <div class="tooltip-row"><span class="tooltip-label">Δ:</span><span class="tooltip-value ${getColorClass(momDiff)}">${formatDelta(momDiff, momPct, metric.isPercentage)}</span></div>
     </div>
     <div class="tooltip-divider"></div>
     <div class="tooltip-section">
       <div class="tooltip-comparison-header">vs Previous Year</div>
       <div class="tooltip-row"><span class="tooltip-label">Period:</span><span class="tooltip-value">${formatDate(prevYearRange.start)} - ${formatDate(prevYearRange.end)}</span></div>
       <div class="tooltip-row"><span class="tooltip-label">Value:</span><span class="tooltip-value">${formatNumber(metric.prevYear, metric.isPercentage)}</span></div>
-      <div class="tooltip-row"><span class="tooltip-label">Δ:</span><span class="tooltip-value ${yoyDiff >= 0 ? 'positive' : 'negative'}">${formatDelta(yoyDiff, yoyPct, metric.isPercentage)}</span></div>
+      <div class="tooltip-row"><span class="tooltip-label">Δ:</span><span class="tooltip-value ${getColorClass(yoyDiff)}">${formatDelta(yoyDiff, yoyPct, metric.isPercentage)}</span></div>
     </div>
   `;
 }
 
-function showTooltipForBar(e, date, currentVal, refVal, metricName, isPercentage) {
-  tooltip.innerHTML = generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage);
+function showTooltipForBar(e, date, currentVal, refVal, metricName, isPercentage, isUnfavorable = false) {
+  tooltip.innerHTML = generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage, isUnfavorable);
   tooltip.classList.remove('hidden');
   lastEvent = e;
   updateTooltipPosition();
 }
 
-function generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage) {
+function generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage, isUnfavorable = false) {
   const diff = currentVal - refVal;
   const pct = refVal ? (diff / refVal) * 100 : 0;
   const formatDate = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   const triangle = diff >= 0 ? '▲' : '▼';
   const sign = diff >= 0 ? '+' : '';
-  const colorClass = diff >= 0 ? 'positive' : 'negative';
+  // Invert colors for unfavorable metrics
+  const colorClass = isUnfavorable
+    ? (diff >= 0 ? 'negative' : 'positive')  // Inverted
+    : (diff >= 0 ? 'positive' : 'negative'); // Normal
 
   const deltaValue = isPercentage ? `${sign}${(diff * 100).toFixed(1)} pp` : `${sign}${formatNumber(Math.abs(diff), false)}`;
   const pctStr = `${sign}${pct.toFixed(1)}%`;
