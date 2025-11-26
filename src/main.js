@@ -12,6 +12,69 @@ let state = {
   lastStateHash: null // Hash to detect real changes
 };
 
+
+// -------------------- Helpers --------------------
+function getRange(period, anchorDate) {
+  const year = anchorDate.getUTCFullYear();
+  const month = anchorDate.getUTCMonth();
+  const day = anchorDate.getUTCDate();
+
+  let start, end;
+  end = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+
+  if (period === 'mtd') {
+    start = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+  } else if (period === 'qtd') {
+    const qStart = Math.floor(month / 3) * 3;
+    start = new Date(Date.UTC(year, qStart, 1, 0, 0, 0, 0));
+  } else if (period === 'ytd') {
+    start = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
+  } else if (period === 'rolling_30') {
+    const endDateUTC = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+    start = new Date(endDateUTC);
+    start.setDate(start.getDate() - 29);
+  }
+
+  return { start, end };
+}
+
+function getPrevMonthRange(range) {
+  const start = new Date(range.start);
+  const end = new Date(range.end);
+  start.setUTCMonth(start.getUTCMonth() - 1);
+  end.setUTCMonth(end.getUTCMonth() - 1);
+  return { start, end };
+}
+
+function getPrevYearRange(range) {
+  const start = new Date(range.start);
+  const end = new Date(range.end);
+  start.setUTCFullYear(start.getUTCFullYear() - 1);
+  end.setUTCFullYear(end.getUTCFullYear() - 1);
+  return { start, end };
+}
+
+function formatNumber(val, isPercentage) {
+  if (val === undefined || val === null) return '-';
+  if (isPercentage) {
+    return (val * 100).toFixed(1) + '%';
+  }
+  if (val >= 1000000) return (val / 1000000).toFixed(1) + 'M';
+  if (val >= 1000) return (val / 1000).toFixed(1) + 'K';
+  return val.toFixed(1);
+}
+
+function showDebug(message) {
+  const debugDiv = document.getElementById('debug-info');
+  if (debugDiv) {
+    debugDiv.style.display = 'block';
+    debugDiv.style.zIndex = '99999';
+    debugDiv.style.background = 'rgba(255,255,255,0.8)';
+    debugDiv.innerHTML += `<div>${message}</div>`;
+  }
+  console.log(message);
+}
+
 // -------------------- Initialization --------------------
 document.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -979,67 +1042,7 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     });
 }
 
-// -------------------- Helpers --------------------
-function getRange(period, anchorDate) {
-  const year = anchorDate.getUTCFullYear();
-  const month = anchorDate.getUTCMonth();
-  const day = anchorDate.getUTCDate();
 
-  let start, end;
-  end = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
-
-  if (period === 'mtd') {
-    start = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
-  } else if (period === 'qtd') {
-    const qStart = Math.floor(month / 3) * 3;
-    start = new Date(Date.UTC(year, qStart, 1, 0, 0, 0, 0));
-  } else if (period === 'ytd') {
-    start = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
-  } else if (period === 'rolling_30') {
-    const endDateUTC = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
-    start = new Date(endDateUTC);
-    start.setDate(start.getDate() - 29);
-  }
-
-  return { start, end };
-}
-
-function getPrevMonthRange(range) {
-  const start = new Date(range.start);
-  const end = new Date(range.end);
-  start.setUTCMonth(start.getUTCMonth() - 1);
-  end.setUTCMonth(end.getUTCMonth() - 1);
-  return { start, end };
-}
-
-function getPrevYearRange(range) {
-  const start = new Date(range.start);
-  const end = new Date(range.end);
-  start.setUTCFullYear(start.getUTCFullYear() - 1);
-  end.setUTCFullYear(end.getUTCFullYear() - 1);
-  return { start, end };
-}
-
-function formatNumber(val, isPercentage) {
-  if (val === undefined || val === null) return '-';
-  if (isPercentage) {
-    return (val * 100).toFixed(1) + '%';
-  }
-  if (val >= 1000000) return (val / 1000000).toFixed(1) + 'M';
-  if (val >= 1000) return (val / 1000).toFixed(1) + 'K';
-  return val.toFixed(1);
-}
-
-function showDebug(message) {
-  const debugDiv = document.getElementById('debug-info');
-  if (debugDiv) {
-    debugDiv.style.display = 'block';
-    debugDiv.style.zIndex = '99999';
-    debugDiv.style.background = 'rgba(255,255,255,0.8)';
-    debugDiv.innerHTML += `<div>${message}</div>`;
-  }
-  console.log(message);
-}
 
 // -------------------- Tooltip --------------------
 let tooltip = null;
