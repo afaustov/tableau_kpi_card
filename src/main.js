@@ -634,9 +634,9 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       return d.value > refVal ? '#4f46e5' : '#d97706';
     })
     .transition() // Add entrance animation
-    .duration(800)
-    .delay((d, i) => i * 50) // More staggered delay
-    .ease(d3.easeElasticOut.amplitude(1).period(0.8)) // Elastic bounce effect
+    .duration(600)
+    .delay((d, i) => i * 30) // Simple staggered delay
+    .ease(d3.easeQuadOut) // Smooth, professional ease
     .attr('y', d => y(d.value))
     .attr('height', d => y(0) - y(d.value));
 
@@ -678,15 +678,13 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       const refVal = referenceData ? referenceData[index]?.value : 0;
       showTooltipForBar(e, d.date, d.value, refVal, metricName, isPercentage);
 
-      // Highlight effect
+      // Highlight effect - only scale the hovered bar
       const chartContainer = document.getElementById(elementId);
       const bars = chartContainer.querySelectorAll('.bar-current');
       bars.forEach((bar, i) => {
         if (i === index) {
           bar.classList.add('active');
-          bar.classList.remove('inactive');
         } else {
-          bar.classList.add('inactive');
           bar.classList.remove('active');
         }
       });
@@ -697,7 +695,6 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       const bars = chartContainer.querySelectorAll('.bar-current');
       bars.forEach(bar => {
         bar.classList.remove('active');
-        bar.classList.remove('inactive');
       });
     })
     .on('mousemove', (e) => {
