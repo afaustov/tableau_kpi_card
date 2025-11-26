@@ -14,14 +14,17 @@
       <permission>full data</permission>
     </permissions>
     <!-- Encodings define which fields the user can map in the extension UI -->
-    <encoding id="metric">
-      <display-name>Metrics</display-name>
+    <encoding id="bars">
+      <display-name>Bars</display-name>
     </encoding>
-    <encoding id="date">
-      <display-name>Dates</display-name>
+    <encoding id="lines">
+      <display-name>Lines</display-name>
     </encoding>
-    <encoding id="weight">
-      <display-name>Weights</display-name>
+    <encoding id="unfavorable">
+      <display-name>Unfavorable</display-name>
+    </encoding>
+    <encoding id="tooltip">
+      <display-name>Tooltip</display-name>
     </encoding>
   </worksheet-extension>
   <resources>
