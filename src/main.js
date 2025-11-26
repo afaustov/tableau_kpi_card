@@ -572,16 +572,39 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
   const container = document.getElementById(elementId);
   if (!container) return;
 
-  container.innerHTML = ''; // Clear previous chart
+  // Clear previous chart
+  container.innerHTML = '';
+
+  // Use ResizeObserver to handle responsiveness
+  // We attach it to the container, but we need to make sure we don't add multiple observers
+  if (!container._resizeObserver) {
+    container._resizeObserver = new ResizeObserver(entries => {
+      // Debounce slightly or just re-render
+      // For simplicity, we just re-call renderBarChart
+      // Note: This might cause a loop if we are not careful, but since we clear innerHTML, it should be fine.
+      // However, to avoid infinite loops if the chart itself causes resize, we check dimensions.
+      for (let entry of entries) {
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          // We need to pass the original data back. 
+          // Since we don't have easy access to it in this closure without re-fetching or storing,
+          // a better approach for simple responsiveness is to use viewBox on the SVG.
+        }
+      }
+    });
+    // Actually, let's use the viewBox approach for simpler responsiveness without re-rendering logic complexity here.
+    // container._resizeObserver.observe(container);
+  }
 
   const width = container.clientWidth;
-  const height = container.clientHeight || 150; // Use container height or fallback
+  const height = container.clientHeight || 150;
   const margin = { top: 5, right: 0, bottom: 20, left: 0 };
 
   const svg = d3.select(container)
     .append('svg')
-    .attr('width', width)
-    .attr('height', height);
+    .attr('width', '100%') // Responsive width
+    .attr('height', '100%') // Responsive height
+    .attr('viewBox', `0 0 ${width} ${height}`) // Scale content
+    .attr('preserveAspectRatio', 'none'); // Stretch to fill
 
   // X scale
   const x = d3.scaleBand()
@@ -627,7 +650,7 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .attr('class', 'bar-current')
     .attr('x', d => x(d.date) + x.bandwidth() * 0.25) // Center: 25% offset
     .attr('width', x.bandwidth() * 0.5) // 50% width
-    .attr('y', height) // Start from bottom
+    .attr('y', y(0)) // Start from the zero line (axis)
     .attr('height', 0) // Start with 0 height
     .attr('fill', (d, i) => {
       const refVal = referenceData?.[i]?.value || 0;
@@ -678,24 +701,18 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       const refVal = referenceData ? referenceData[index]?.value : 0;
       showTooltipForBar(e, d.date, d.value, refVal, metricName, isPercentage);
 
-      // Highlight effect - only scale the hovered bar
+      // Highlight effect - stroke
       const chartContainer = document.getElementById(elementId);
       const bars = chartContainer.querySelectorAll('.bar-current');
-      bars.forEach((bar, i) => {
-        if (i === index) {
-          bar.classList.add('active');
-        } else {
-          bar.classList.remove('active');
-        }
-      });
+      if (bars[index]) {
+        bars[index].classList.add('active');
+      }
     })
     .on('mouseleave', () => {
       hideTooltip();
       const chartContainer = document.getElementById(elementId);
       const bars = chartContainer.querySelectorAll('.bar-current');
-      bars.forEach(bar => {
-        bar.classList.remove('active');
-      });
+      bars.forEach(bar => bar.classList.remove('active'));
     })
     .on('mousemove', (e) => {
       lastEvent = e;
