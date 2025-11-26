@@ -429,10 +429,17 @@ function renderKPIs(metrics, showSkeleton = false) {
     const yoyDiff = metric.current - metric.prevYear;
     const yoyPct = metric.prevYear ? (yoyDiff / metric.prevYear) * 100 : 0;
 
-    const chartId = `chart-${metric.name.replace(/\s+/g, '-')}`;
+    const chartId = `chart-${metric.name.replace(/\s+/g, '-')}-${metric.chartType}`;
 
-    // Helper for trend class
-    const getTrendClass = (val) => val >= 0 ? 'trend-up' : 'trend-down';
+    // Helper for trend class - INVERTED for unfavorable metrics
+    const getTrendClass = (val) => {
+      if (metric.isUnfavorable) {
+        // Inverted: negative is good (blue), positive is bad (orange)
+        return val >= 0 ? 'trend-down' : 'trend-up';
+      }
+      return val >= 0 ? 'trend-up' : 'trend-down';
+    };
+
     const formatDelta = (val, isPct) => {
       const sign = val >= 0 ? '+' : '';
       return isPct ? `${sign}${val.toFixed(1)}%` : `${sign}${formatNumber(Math.abs(val), false)}`;
@@ -484,11 +491,15 @@ function renderKPIs(metrics, showSkeleton = false) {
 
     container.appendChild(item);
 
-    // Show skeleton or real chart
+    // Show skeleton or real chart based on chartType
     if (showSkeleton) {
       renderSkeletonChart(chartId);
-    } else if (metric.barChartDataCurrent && metric.barChartDataCurrent.length > 0) {
-      renderBarChart(chartId, metric.barChartDataCurrent, metric.barChartDataReference, metric.name, metric.dateFieldName, metric.isPercentage);
+    } else if (metric.chartDataCurrent && metric.chartDataCurrent.length > 0) {
+      if (metric.chartType === 'line') {
+        renderLineChart(chartId, metric.chartDataCurrent, metric.chartDataReference, metric.name, metric.dateFieldName, metric.isPercentage, metric.isUnfavorable);
+      } else {
+        renderBarChart(chartId, metric.chartDataCurrent, metric.chartDataReference, metric.name, metric.dateFieldName, metric.isPercentage, metric.isUnfavorable);
+      }
     }
   });
 }
@@ -513,42 +524,46 @@ function renderSkeletonChart(elementId) {
   container.innerHTML = `<div class="skeleton-chart">${bars.join('')}</div>`;
 }
 
-// Lazy load bar charts in background
-async function loadBarChartsAsync(worksheet, dateFieldName, metrics, periods) {
-  console.time('⏱️ Load Bar Charts (Async)');
+// Lazy load charts (bars and lines) in background
+async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
+  console.time('⏱️ Load Charts (Async)');
 
-  for (const metric of metrics) {
+  for (const card of cards) {
     try {
-      console.log(`📊 Loading chart for ${metric.name}...`);
+      console.log(`📊 Loading ${card.chartType} chart for ${card.name}...`);
 
-      // Fetch bar chart data for current period
-      const barChartDataCurrent = await fetchBarChartData(
+      // Fetch chart data for current period
+      const chartDataCurrent = await fetchBarChartData(
         worksheet,
         dateFieldName,
-        metric.name,
+        card.name,
         periods.current
       );
 
-      // Fetch bar chart data for reference period
-      const barChartDataReference = await fetchBarChartData(
+      // Fetch chart data for reference period
+      const chartDataReference = await fetchBarChartData(
         worksheet,
         dateFieldName,
-        metric.name,
+        card.name,
         periods.prevMonth
       );
 
       // Replace skeleton with real chart
-      const chartId = `chart-${metric.name.replace(/\s+/g, '-')}`;
-      if (barChartDataCurrent && barChartDataCurrent.length > 0) {
-        renderBarChart(chartId, barChartDataCurrent, barChartDataReference, metric.name, dateFieldName, metric.isPercentage);
-        console.log(`✅ Chart loaded for ${metric.name}`);
+      const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
+      if (chartDataCurrent && chartDataCurrent.length > 0) {
+        if (card.chartType === 'line') {
+          renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+        } else {
+          renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+        }
+        console.log(`✅ ${card.chartType} chart loaded for ${card.name}`);
       }
     } catch (e) {
-      console.error(`❌ Failed to load chart for ${metric.name}:`, e);
+      console.error(`❌ Failed to load chart for ${card.name}:`, e);
     }
   }
 
-  console.timeEnd('⏱️ Load Bar Charts (Async)');
+  console.timeEnd('⏱️ Load Charts (Async)');
 }
 
 async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
