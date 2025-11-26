@@ -208,12 +208,26 @@ async function refreshKPIs(worksheet) {
           .map(e => e.field?.name || e.field || e.fieldName)
           .filter(Boolean);
 
-      metricFields = getFieldNames('metric');
+      // Get fields from new encodings
+      const barsFields = getFieldNames('bars');
+      const linesFields = getFieldNames('lines');
+      const unfavorableFields = getFieldNames('unfavorable');
+      const tooltipFields = getFieldNames('tooltip');
+
+      // Combine bars and lines as metricFields for data fetching
+      metricFields = [...new Set([...barsFields, ...linesFields])];
+
       const dateFields = getFieldNames('date');
       dateFieldName = dateFields[0] || null;
 
-      showDebug(`🔍 Metrics (Spec): ${metricFields.join(', ')}`);
-      showDebug(`🔍 Date (Spec): ${dateFieldName}`);
+      showDebug(`🔍 Bars: ${barsFields.join(', ')}`);
+      showDebug(`🔍 Lines: ${linesFields.join(', ')}`);
+      showDebug(`🔍 Unfavorable: ${unfavorableFields.join(', ')}`);
+      showDebug(`🔍 Tooltip: ${tooltipFields.join(', ')}`);
+      showDebug(`🔍 Date: ${dateFieldName}`);
+
+      // Store encoding info in state for later use
+      state.encodings = { barsFields, linesFields, unfavorableFields, tooltipFields };
     }
 
     if (!dateFieldName) {
@@ -339,13 +353,15 @@ async function refreshKPIs(worksheet) {
     // 4. Clear Filter
     await worksheet.clearFilterAsync(dateFieldName);
 
-    // 5. Prepare metrics data (without charts for now - lazy loading)
-    const metricsData = metricFields.map((mName) => {
+    // 5. Prepare metrics data - create separate cards for bars and lines
+    const cards = [];
+
+    function createCardData(mName, chartType) {
       const curObj = results.current?.[mName];
       const prevMObj = results.prevMonth?.[mName];
-
       const curVal = curObj?.val || 0;
       const refVal = prevMObj?.val || 0;
+      const isUnfavorable = state.encodings.unfavorableFields.includes(mName);
 
       return {
         name: mName,
@@ -355,15 +371,28 @@ async function refreshKPIs(worksheet) {
         prevYear: results.prevYear?.[mName]?.val || 0,
         isPercentage: curObj?.fmt?.includes('%') ?? false,
         formattedValue: curObj?.fmt,
-        dateFieldName
+        dateFieldName,
+        chartType, // 'bar' or 'line'
+        isUnfavorable,
+        tooltipFields: state.encodings.tooltipFields
       };
+    }
+
+    // Create cards for bars
+    state.encodings.barsFields.forEach(mName => {
+      cards.push(createCardData(mName, 'bar'));
+    });
+
+    // Create cards for lines
+    state.encodings.linesFields.forEach(mName => {
+      cards.push(createCardData(mName, 'line'));
     });
 
     // Render KPIs immediately with skeleton charts
-    renderKPIs(metricsData, true); // true = show skeleton
+    renderKPIs(cards, true); // true = show skeleton
 
-    // Lazy load bar charts in background
-    loadBarChartsAsync(worksheet, dateFieldName, metricsData, periods);
+    // Lazy load charts in background
+    loadChartsAsync(worksheet, dateFieldName, cards, periods);
 
     // Update state hash after successful refresh
     state.lastStateHash = await computeStateHash(worksheet);
