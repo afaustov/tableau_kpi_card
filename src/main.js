@@ -419,7 +419,7 @@ function renderKPIs(metrics, showSkeleton = false) {
             ${yoyDiff >= 0 ? '▲' : '▼'} ${Math.abs(yoyPct).toFixed(1)}%
           </span>
           <span class="comp-divider">|</span>
-          <span class="comp-val ${getTrendClass(yoyDiff)}" style="font-size: 0.9em; opacity: 0.8;">
+          <span class="comp-val ${getTrendClass(yoyDiff)}">
              ${formatDelta(yoyDiff, metric.isPercentage)}
           </span>
         </div>
@@ -430,7 +430,7 @@ function renderKPIs(metrics, showSkeleton = false) {
             ${momDiff >= 0 ? '▲' : '▼'} ${Math.abs(momPct).toFixed(1)}%
           </span>
           <span class="comp-divider">|</span>
-           <span class="comp-val ${getTrendClass(momDiff)}" style="font-size: 0.9em; opacity: 0.8;">
+           <span class="comp-val ${getTrendClass(momDiff)}">
              ${formatDelta(momDiff, metric.isPercentage)}
           </span>
         </div>
@@ -627,12 +627,18 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .attr('class', 'bar-current')
     .attr('x', d => x(d.date) + x.bandwidth() * 0.25) // Center: 25% offset
     .attr('width', x.bandwidth() * 0.5) // 50% width
-    .attr('y', d => y(d.value))
-    .attr('height', d => y(0) - y(d.value))
+    .attr('y', height) // Start from bottom
+    .attr('height', 0) // Start with 0 height
     .attr('fill', (d, i) => {
       const refVal = referenceData?.[i]?.value || 0;
       return d.value > refVal ? '#4f46e5' : '#d97706';
-    });
+    })
+    .transition() // Add entrance animation
+    .duration(600)
+    .delay((d, i) => i * 30) // Staggered delay
+    .ease(d3.easeCubicOut)
+    .attr('y', d => y(d.value))
+    .attr('height', d => y(0) - y(d.value));
 
   // Axis Labels (Start and End Date)
   if (currentData.length > 0) {
