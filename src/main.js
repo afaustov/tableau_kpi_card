@@ -632,17 +632,17 @@ function renderSkeletonLineChart(elementId) {
         }
       </style>
       
-      <!-- Reference line simulation (solid, thin) -->
-      <path d="M0,60 Q30,55 50,65 T100,55" 
+      <!-- Reference line simulation (solid, very thin, more wavy) -->
+      <path d="M0,55 Q15,48 25,52 Q35,58 45,50 Q55,42 65,48 Q75,54 85,47 Q92,43 100,50" 
             fill="none" 
             stroke="#e2e8f0" 
-            stroke-width="2" />
+            stroke-width="1" />
 
-      <!-- Current line simulation (solid, thin, pulsing) -->
-      <path d="M0,80 Q25,40 50,70 T100,20" 
+      <!-- Current line simulation (solid, very thin, more wavy, pulsing) -->
+      <path d="M0,70 Q12,35 20,45 Q30,58 40,40 Q50,25 60,50 Q70,72 80,55 Q90,38 100,60" 
             fill="none" 
             stroke="#cbd5e1" 
-            stroke-width="2.5"
+            stroke-width="1.5"
             class="skeleton-line-main" />
     </svg>
   `;
