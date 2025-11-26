@@ -555,31 +555,33 @@ function renderSkeletonLineChart(elementId) {
   const container = document.getElementById(elementId);
   if (!container) return;
 
-  // Use a responsive SVG with relative coordinates (0-100)
-  // This avoids issues where clientWidth might be 0 during initial render
+  // Two gray lines simulating current and reference with pulse animation
   const svg = `
     <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style="overflow: visible;">
-      <defs>
-        <linearGradient id="skeleton-gradient-${elementId}" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="#f3f4f6">
-            <animate attributeName="stop-color" values="#f3f4f6; #e5e7eb; #f3f4f6" dur="2s" repeatCount="indefinite" />
-          </stop>
-          <stop offset="50%" stop-color="#e5e7eb">
-             <animate attributeName="stop-color" values="#e5e7eb; #f3f4f6; #e5e7eb" dur="2s" repeatCount="indefinite" />
-          </stop>
-          <stop offset="100%" stop-color="#f3f4f6">
-             <animate attributeName="stop-color" values="#f3f4f6; #e5e7eb; #f3f4f6" dur="2s" repeatCount="indefinite" />
-          </stop>
-        </linearGradient>
-      </defs>
-      <path d="M0,80 Q25,50 50,70 T100,30 L100,100 L0,100 Z" 
-            fill="url(#skeleton-gradient-${elementId})" 
-            stroke="none" />
-      <path d="M0,80 Q25,50 50,70 T100,30" 
+      <style>
+        @keyframes pulse-stroke {
+          0% { stroke: #e2e8f0; }
+          50% { stroke: #94a3b8; }
+          100% { stroke: #e2e8f0; }
+        }
+        .skeleton-line-main {
+          animation: pulse-stroke 1.5s infinite ease-in-out;
+        }
+      </style>
+      
+      <!-- Reference line simulation (dashed) -->
+      <path d="M0,60 Q30,55 50,65 T100,55" 
             fill="none" 
-            stroke="#e5e7eb" 
+            stroke="#e2e8f0" 
             stroke-width="2" 
-            vector-effect="non-scaling-stroke" />
+            stroke-dasharray="4,4" />
+
+      <!-- Current line simulation (solid, pulsing) -->
+      <path d="M0,80 Q25,40 50,70 T100,20" 
+            fill="none" 
+            stroke="#cbd5e1" 
+            stroke-width="3"
+            class="skeleton-line-main" />
     </svg>
   `;
 
@@ -835,8 +837,8 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
 
   const width = container.clientWidth;
   const height = container.clientHeight || 150;
-  // Increase margins to prevent cutoff
-  const margin = { top: 10, right: 10, bottom: 20, left: 10 };
+  // Increase margins to prevent cutoff (top increased from 10 to 15)
+  const margin = { top: 15, right: 10, bottom: 20, left: 10 };
 
   const svg = d3.select(container)
     .append('svg')
@@ -850,14 +852,14 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .domain([d3.min(currentData, d => d.date), d3.max(currentData, d => d.date)])
     .range([margin.left, width - margin.right]);
 
-  // Y scale - add 10% padding on top
+  // Y scale - add 25% padding on top to prevent cutoff
   const maxVal = Math.max(
     d3.max(currentData, d => d.value) || 0,
     d3.max(referenceData || [], d => d.value) || 0
   );
 
   const y = d3.scaleLinear()
-    .domain([0, maxVal * 1.1])
+    .domain([0, maxVal * 1.25])
     .range([height - margin.bottom, margin.top]);
 
   // Line generator
