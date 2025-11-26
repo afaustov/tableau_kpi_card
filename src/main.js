@@ -550,39 +550,40 @@ function renderSkeletonChart(elementId) {
 }
 
 
-for (const card of cards) {
-  try {
-    console.log(`📊 Loading ${card.chartType} chart for ${card.name}...`);
+// Render skeleton loading animation for line chart
+function renderSkeletonLineChart(elementId) {
+  const container = document.getElementById(elementId);
+  if (!container) return;
 
-    // Fetch chart data for current period
-    const chartDataCurrent = await fetchBarChartData(
-      worksheet,
-      dateFieldName,
-      card.name,
-      periods.current
-    );
+  // Use a responsive SVG with relative coordinates (0-100)
+  // This avoids issues where clientWidth might be 0 during initial render
+  const svg = `
+    <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style="overflow: visible;">
+      <defs>
+        <linearGradient id="skeleton-gradient-${elementId}" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#f3f4f6">
+            <animate attributeName="stop-color" values="#f3f4f6; #e5e7eb; #f3f4f6" dur="2s" repeatCount="indefinite" />
+          </stop>
+          <stop offset="50%" stop-color="#e5e7eb">
+             <animate attributeName="stop-color" values="#e5e7eb; #f3f4f6; #e5e7eb" dur="2s" repeatCount="indefinite" />
+          </stop>
+          <stop offset="100%" stop-color="#f3f4f6">
+             <animate attributeName="stop-color" values="#f3f4f6; #e5e7eb; #f3f4f6" dur="2s" repeatCount="indefinite" />
+          </stop>
+        </linearGradient>
+      </defs>
+      <path d="M0,80 Q25,50 50,70 T100,30 L100,100 L0,100 Z" 
+            fill="url(#skeleton-gradient-${elementId})" 
+            stroke="none" />
+      <path d="M0,80 Q25,50 50,70 T100,30" 
+            fill="none" 
+            stroke="#e5e7eb" 
+            stroke-width="2" 
+            vector-effect="non-scaling-stroke" />
+    </svg>
+  `;
 
-    // Fetch chart data for reference period
-    const chartDataReference = await fetchBarChartData(
-      worksheet,
-      dateFieldName,
-      card.name,
-      periods.prevMonth
-    );
-
-    // Replace skeleton with real chart
-    const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
-    if (chartDataCurrent && chartDataCurrent.length > 0) {
-      if (card.chartType === 'line') {
-        renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
-      } else {
-        renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
-      }
-      console.log(`✅ ${card.chartType} chart loaded for ${card.name}`);
-    }
-  } catch (e) {
-    console.error(`❌ Failed to load chart for ${card.name}:`, e);
-  }
+  container.innerHTML = `<div class="skeleton-chart" style="display:block; width:100%; height:100%;">${svg}</div>`;
 }
 
 // Lazy load charts (bars and lines) in background
