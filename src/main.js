@@ -827,11 +827,161 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
 }
 
 // Render line chart for metric
+// Render line chart for metric
 function renderLineChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable) {
   const container = document.getElementById(elementId);
   if (!container) return;
 
   container.innerHTML = '';
+  container.style.overflow = 'hidden'; // Fix overflow issues
+
+  const width = container.clientWidth;
+  const height = container.clientHeight || 150;
+  // Increase margins to prevent cutoff (top increased from 10 to 15)
+  const margin = { top: 15, right: 10, bottom: 20, left: 10 };
+
+  const svg = d3.select(container)
+    .append('svg')
+    .attr('width', '100%')
+    .attr('height', '100%')
+    .attr('viewBox', `0 0 ${width} ${height}`)
+    .attr('preserveAspectRatio', 'xMidYMid meet');
+
+  // X scale (time)
+  const x = d3.scaleTime()
+    .domain([d3.min(currentData, d => d.date), d3.max(currentData, d => d.date)])
+    .range([margin.left, width - margin.right]);
+
+  // Y scale - smart domain calculation to fit all values (positive and negative)
+  const allValues = [
+    ...currentData.map(d => d.value),
+    ...(referenceData || []).map(d => d.value)
+  ];
+
+  // If no data, default to [0, 100]
+  let minData = 0;
+  let maxData = 100;
+
+  if (allValues.length > 0) {
+    minData = d3.min(allValues);
+    maxData = d3.max(allValues);
+  }
+
+  // Add padding (15% of the range)
+  const range = maxData - minData;
+  // If range is 0 (flat line), add some default padding based on the value magnitude
+  const padding = range > 0 ? range * 0.15 : (Math.abs(maxData) * 0.15 || 10);
+
+  const yMin = minData - padding;
+  const yMax = maxData + padding;
+
+  const y = d3.scaleLinear()
+    .domain([yMin, yMax])
+    .range([height - margin.bottom, margin.top]);
+
+  // Line generator
+  const line = d3.line()
+    .x(d => x(d.date))
+    .y(d => y(d.value))
+    .curve(d3.curveMonotoneX);
+
+  // Draw reference line (Solid Gray)
+  if (referenceData && referenceData.length > 0) {
+    const referenceLineData = currentData.map((d, i) => ({
+      date: d.date,
+      value: referenceData[i]?.value || 0
+    }));
+
+    svg.append('path')
+      .datum(referenceLineData)
+      .attr('fill', 'none')
+      .attr('stroke', '#cbd5e1') // Slate-300
+      .attr('stroke-width', 1.5)
+      // Removed stroke-dasharray for solid line
+      .attr('d', line);
+  }
+
+  // Draw current period line
+  const currentPath = svg.append('path')
+    .datum(currentData)
+    .attr('fill', 'none')
+    .attr('stroke', '#4f46e5') // Indigo-600
+    .attr('stroke-width', 2.5) // Slightly thicker for emphasis
+    .attr('d', line);
+
+  // Animate line drawing
+  const totalLength = currentPath.node().getTotalLength();
+  currentPath
+    .attr('stroke-dasharray', totalLength + ' ' + totalLength)
+    .attr('stroke-dashoffset', totalLength)
+    .transition()
+    .duration(800)
+    .ease(d3.easeQuadOut)
+    .attr('stroke-dashoffset', 0);
+
+  // Hover Dot (initially hidden)
+  const hoverDot = svg.append('circle')
+    .attr('r', 4)
+    .attr('fill', '#4f46e5')
+    .attr('stroke', '#fff')
+    .attr('stroke-width', 2)
+    .style('opacity', 0)
+    .style('pointer-events', 'none');
+
+  // Axis labels
+  if (currentData.length > 0) {
+    const formatDate = d3.timeFormat('%b %d');
+    svg.append('text')
+      .attr('x', margin.left)
+      .attr('y', height - 5)
+      .attr('font-size', '10px')
+      .attr('fill', '#9ca3af')
+      .text(formatDate(currentData[0].date));
+
+    svg.append('text')
+      .attr('x', width - margin.right)
+      .attr('y', height - 5)
+      .attr('text-anchor', 'end')
+      .attr('font-size', '10px')
+      .attr('fill', '#9ca3af')
+      .text(formatDate(currentData[currentData.length - 1].date));
+  }
+
+  // Tooltip overlays
+  svg.selectAll('.line-overlay')
+    .data(currentData)
+    .enter()
+    .append('rect') // Use rects for better hit area
+    .attr('x', d => x(d.date) - (width / currentData.length) / 2)
+    .attr('y', 0)
+    .attr('width', width / currentData.length)
+    .attr('height', height)
+    .attr('fill', 'transparent')
+    .attr('cursor', 'pointer')
+    .on('mouseenter', (e, d) => {
+      const index = currentData.indexOf(d);
+      const refVal = referenceData ? referenceData[index]?.value : 0;
+      showTooltipForBar(e, d.date, d.value, refVal, metricName, isPercentage, isUnfavorable);
+
+      // Show and move hover dot
+      hoverDot
+        .attr('cx', x(d.date))
+        .attr('cy', y(d.value))
+        .style('opacity', 1);
+    })
+    .on('mouseleave', () => {
+      hideTooltip();
+      hoverDot.style('opacity', 0);
+    })
+    .on('mousemove', (e) => {
+      lastEvent = e;
+      updateTooltipPosition();
+    });
+}
+
+// -------------------- Helpers --------------------
+function getRange(period, anchorDate) {
+  const year = anchorDate.getUTCFullYear();
   const month = anchorDate.getUTCMonth();
   const day = anchorDate.getUTCDate();
 
@@ -896,6 +1046,10 @@ let tooltip = null;
 let tooltipCache = new Map();
 let rafId = null;
 let lastEvent = null;
+
+
+
+
 
 function initTooltip() {
   tooltip = document.createElement('div');
