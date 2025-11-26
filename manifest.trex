@@ -16,21 +16,12 @@
     <!-- Encodings define which fields the user can map in the extension UI -->
     <encoding id="bars">
       <display-name>Bars</display-name>
-      <encoding-icon>
-        <data>PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB4PSI0IiB5PSIxNCIgd2lkdGg9IjQiIGhlaWdodD0iNiIgZmlsbD0iIzY2NjY2NiIvPgogIDxyZWN0IHg9IjEwIiB5PSI4IiB3aWR0aD0iNCIgaGVpZ2h0PSIxMiIgZmlsbD0iIzY2NjY2NiIvPgogIDxyZWN0IHg9IjE2IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSIxNiIgZmlsbD0iIzY2NjY2NiIvPgo8L3N2Zz4=</data>
-      </encoding-icon>
     </encoding>
     <encoding id="lines">
       <display-name>Lines</display-name>
-      <encoding-icon>
-        <data>PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkPSJNMyAxOEw3IDEyTDEyIDE1TDIwIDYiIHN0cm9rZT0iIzY2NjY2NiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8Y2lyY2xlIGN4PSIzIiBjeT0iMTgiIHI9IjIiIGZpbGw9IiM2NjY2NjYiLz4KICA8Y2lyY2xlIGN4PSI3IiBjeT0iMTIiIHI9IjIiIGZpbGw9IiM2NjY2NjYiLz4KICA8Y2lyY2xlIGN4PSIxMiIgY3k9IjE1IiByPSIyIiBmaWxsPSIjNjY2NjY2Ii8+CiAgPGNpcmNsZSBjeD0iMjAiIGN5PSI2IiByPSIyIiBmaWxsPSIjNjY2NjY2Ii8+Cjwvc3ZnPg==</data>
-      </encoding-icon>
     </encoding>
     <encoding id="unfavorable">
       <display-name>Unfavorable</display-name>
-      <encoding-icon>
-        <data>PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkPSJNMTIgNVYxOSIgc3Ryb2tlPSIjNjY2NjY2IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxwYXRoIGQ9Ik01IDEySDE5IiBzdHJva2U9IiM2NjY2NjYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPHBhdGggZD0iTTUgMThIMTkiIHN0cm9rZT0iIzY2NjY2NiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+</data>
-      </encoding-icon>
     </encoding>
   </worksheet-extension>
   <resources>
