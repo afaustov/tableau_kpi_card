@@ -845,26 +845,6 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .attr('viewBox', `0 0 ${width} ${height}`)
     .attr('preserveAspectRatio', 'xMidYMid meet');
 
-  // Define gradients
-  const defs = svg.append('defs');
-  const gradientId = `area-gradient-${elementId}`;
-  const gradient = defs.append('linearGradient')
-    .attr('id', gradientId)
-    .attr('x1', '0%')
-    .attr('y1', '0%')
-    .attr('x2', '0%')
-    .attr('y2', '100%');
-
-  gradient.append('stop')
-    .attr('offset', '0%')
-    .attr('stop-color', '#4f46e5') // Indigo-600
-    .attr('stop-opacity', 0.2);
-
-  gradient.append('stop')
-    .attr('offset', '100%')
-    .attr('stop-color', '#4f46e5')
-    .attr('stop-opacity', 0);
-
   // X scale (time)
   const x = d3.scaleTime()
     .domain([d3.min(currentData, d => d.date), d3.max(currentData, d => d.date)])
@@ -886,14 +866,7 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .y(d => y(d.value))
     .curve(d3.curveMonotoneX);
 
-  // Area generator
-  const area = d3.area()
-    .x(d => x(d.date))
-    .y0(height - margin.bottom)
-    .y1(d => y(d.value))
-    .curve(d3.curveMonotoneX);
-
-  // Draw reference line (subtle gray)
+  // Draw reference line (Solid Gray)
   if (referenceData && referenceData.length > 0) {
     const referenceLineData = currentData.map((d, i) => ({
       date: d.date,
@@ -905,22 +878,16 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
       .attr('fill', 'none')
       .attr('stroke', '#cbd5e1') // Slate-300
       .attr('stroke-width', 1.5)
-      .attr('stroke-dasharray', '4,4')
+      // Removed stroke-dasharray for solid line
       .attr('d', line);
   }
-
-  // Draw Area
-  svg.append('path')
-    .datum(currentData)
-    .attr('fill', `url(#${gradientId})`)
-    .attr('d', area);
 
   // Draw current period line
   const currentPath = svg.append('path')
     .datum(currentData)
     .attr('fill', 'none')
     .attr('stroke', '#4f46e5') // Indigo-600
-    .attr('stroke-width', 2)
+    .attr('stroke-width', 2.5) // Slightly thicker for emphasis
     .attr('d', line);
 
   // Animate line drawing
