@@ -634,9 +634,9 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       return d.value > refVal ? '#4f46e5' : '#d97706';
     })
     .transition() // Add entrance animation
-    .duration(600)
-    .delay((d, i) => i * 30) // Staggered delay
-    .ease(d3.easeCubicOut)
+    .duration(800)
+    .delay((d, i) => i * 50) // More staggered delay
+    .ease(d3.easeElasticOut.amplitude(1).period(0.8)) // Elastic bounce effect
     .attr('y', d => y(d.value))
     .attr('height', d => y(0) - y(d.value));
 
