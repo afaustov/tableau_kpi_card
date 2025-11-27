@@ -22,13 +22,28 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
         .range([margin.left, width - margin.right]);
 
     // Y scale
-    const maxVal = Math.max(
-        d3.max(currentData, d => d.value) || 0,
-        d3.max(referenceData || [], d => d.value) || 0
-    );
+    // Y scale
+    const allValues = [
+        ...currentData.map(d => d.value),
+        ...(referenceData || []).map(d => d.value)
+    ];
+    const minDataVal = d3.min(allValues) || 0;
+    const maxDataVal = d3.max(allValues) || 0;
+
+    // If all values are positive, we extend the upper bound to "squash" the chart downwards
+    // so it doesn't look like it's floating too high.
+    // If there are negative values, we let it scale naturally to fit them.
+    let yDomain;
+    if (minDataVal >= 0) {
+        yDomain = [0, maxDataVal * 1.35]; // 1.35 factor pushes the chart down
+    } else {
+        // Add a little padding for negative values too
+        const range = maxDataVal - minDataVal;
+        yDomain = [minDataVal - range * 0.05, maxDataVal + range * 0.05];
+    }
 
     const y = d3.scaleLinear()
-        .domain([0, maxVal])
+        .domain(yDomain)
         .range([height - margin.bottom, margin.top]);
 
     // Line generators
