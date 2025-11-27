@@ -632,14 +632,14 @@ function renderSkeletonLineChart(elementId) {
         }
       </style>
       
-      <!-- Reference line simulation (solid, very thin, more wavy) -->
-      <path d="M0,55 Q15,48 25,52 Q35,58 45,50 Q55,42 65,48 Q75,54 85,47 Q92,43 100,50" 
+      <!-- Reference line simulation (solid, very thin, more wavy, lower) -->
+      <path d="M0,75 Q15,68 25,72 Q35,78 45,70 Q55,62 65,68 Q75,74 85,67 Q92,63 100,70" 
             fill="none" 
             stroke="#e2e8f0" 
             stroke-width="1" />
 
-      <!-- Current line simulation (solid, very thin, more wavy, pulsing) -->
-      <path d="M0,70 Q12,35 20,45 Q30,58 40,40 Q50,25 60,50 Q70,72 80,55 Q90,38 100,60" 
+      <!-- Current line simulation (solid, very thin, more wavy, pulsing, lower) -->
+      <path d="M0,85 Q12,55 20,65 Q30,78 40,60 Q50,45 60,70 Q70,88 80,72 Q90,58 100,78" 
             fill="none" 
             stroke="#cbd5e1" 
             stroke-width="1.5"
@@ -947,6 +947,19 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .x(d => x(d.date))
     .y(d => y(d.value))
     .curve(d3.curveMonotoneX);
+
+  // Draw zero line (dashed) if zero is within the domain
+  if (yMin <= 0 && yMax >= 0) {
+    svg.append('line')
+      .attr('x1', margin.left)
+      .attr('x2', width - margin.right)
+      .attr('y1', y(0))
+      .attr('y2', y(0))
+      .attr('stroke', '#9ca3af') // Gray-400
+      .attr('stroke-width', 1)
+      .attr('stroke-dasharray', '4,4')
+      .attr('opacity', 0.5);
+  }
 
   // Draw reference line (Solid Gray)
   if (referenceData && referenceData.length > 0) {
