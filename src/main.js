@@ -194,17 +194,10 @@ async function computeStateHash(worksheet) {
       const encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
 
       // Extract fields from new encodings
-      const barsFields = encodings
-        .filter(e => e.id === 'bars')
-        .map(e => e.field?.name || e.field || e.fieldName)
-        .filter(Boolean)
-        .sort();
-
-      const linesFields = encodings
-        .filter(e => e.id === 'lines')
-        .map(e => e.field?.name || e.field || e.fieldName)
-        .filter(Boolean)
-        .sort();
+      const orderedEncodings = encodings
+        .filter(e => e.id === 'bars' || e.id === 'lines')
+        .map(e => `${e.field?.name || e.field || e.fieldName}(${e.id})`)
+        .join(',');
 
       const unfavorableFields = encodings
         .filter(e => e.id === 'unfavorable')
@@ -224,8 +217,7 @@ async function computeStateHash(worksheet) {
         .filter(Boolean)
         .sort();
 
-      hashParts.push(`bars:${barsFields.join(',')}`);
-      hashParts.push(`lines:${linesFields.join(',')}`);
+      hashParts.push(`metrics:${orderedEncodings}`);
       hashParts.push(`unfavorable:${unfavorableFields.join(',')}`);
       hashParts.push(`tooltip:${tooltipFields.join(',')}`);
       hashParts.push(`dates:${dateFields.join(',')}`);
@@ -299,20 +291,32 @@ async function refreshKPIs(worksheet) {
       const unfavorableFields = getFieldNames('unfavorable');
       const tooltipFields = getFieldNames('tooltip');
 
+      // Create ordered metrics list
+      const orderedMetrics = [];
+      encodings.forEach(e => {
+        const fieldName = e.field?.name || e.field || e.fieldName;
+        if (!fieldName) return;
+
+        if (e.id === 'bars') {
+          orderedMetrics.push({ name: fieldName, type: 'bar' });
+        } else if (e.id === 'lines') {
+          orderedMetrics.push({ name: fieldName, type: 'line' });
+        }
+      });
+
       // Combine bars and lines as metricFields for data fetching
-      metricFields = [...new Set([...barsFields, ...linesFields])];
+      metricFields = [...new Set(orderedMetrics.map(m => m.name))];
 
       const dateFields = getFieldNames('date');
       dateFieldName = dateFields[0] || null;
 
-      showDebug(`🔍 Bars: ${barsFields.join(', ')}`);
-      showDebug(`🔍 Lines: ${linesFields.join(', ')}`);
+      showDebug(`🔍 Ordered Metrics: ${orderedMetrics.map(m => `${m.name}(${m.type})`).join(', ')}`);
       showDebug(`🔍 Unfavorable: ${unfavorableFields.join(', ')}`);
       showDebug(`🔍 Tooltip: ${tooltipFields.join(', ')}`);
       showDebug(`🔍 Date: ${dateFieldName}`);
 
       // Store encoding info in state for later use
-      state.encodings = { barsFields, linesFields, unfavorableFields, tooltipFields };
+      state.encodings = { barsFields, linesFields, unfavorableFields, tooltipFields, orderedMetrics };
     }
 
     if (!dateFieldName) {
@@ -463,15 +467,16 @@ async function refreshKPIs(worksheet) {
       };
     }
 
-    // Create cards for bars
-    state.encodings.barsFields.forEach(mName => {
-      cards.push(createCardData(mName, 'bar'));
-    });
-
-    // Create cards for lines
-    state.encodings.linesFields.forEach(mName => {
-      cards.push(createCardData(mName, 'line'));
-    });
+    // Create cards preserving order
+    if (state.encodings.orderedMetrics && state.encodings.orderedMetrics.length > 0) {
+      state.encodings.orderedMetrics.forEach(metric => {
+        cards.push(createCardData(metric.name, metric.type));
+      });
+    } else {
+      // Fallback
+      state.encodings.barsFields.forEach(mName => cards.push(createCardData(mName, 'bar')));
+      state.encodings.linesFields.forEach(mName => cards.push(createCardData(mName, 'line')));
+    }
 
     // Render KPIs immediately with skeleton charts
     renderKPIs(cards, true); // true = show skeleton
