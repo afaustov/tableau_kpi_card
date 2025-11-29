@@ -9,7 +9,8 @@ let state = {
   isApplyingOwnFilters: false,
   unregisterDataHandler: null,
   handleDataChange: null,
-  lastStateHash: null // Hash to detect real changes
+  lastStateHash: null, // Hash to detect real changes
+  chartCache: {} // Cache for chart data to avoid re-fetching
 };
 
 
@@ -636,13 +637,13 @@ function renderSkeletonLineChart(elementId) {
       <path d="M0,85 Q10,92 20,85 Q30,78 40,85 Q50,92 60,85 Q70,78 80,85 Q90,92 100,85" 
             fill="none" 
             stroke="#e2e8f0" 
-            stroke-width="2" />
+            stroke-width="1" />
 
       <!-- Current line simulation (solid, thicker, wavy, pulsing, lower) -->
       <path d="M0,95 Q10,80 20,90 Q30,98 40,85 Q50,75 60,90 Q70,98 80,85 Q90,75 100,90" 
             fill="none" 
             stroke="#cbd5e1" 
-            stroke-width="3"
+            stroke-width="1"
             class="skeleton-line-main" />
     </svg>
   `;
@@ -658,21 +659,45 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
     try {
       console.log(`📊 Loading ${card.chartType} chart for ${card.name}...`);
 
-      // Fetch chart data for current period
-      const chartDataCurrent = await fetchBarChartData(
-        worksheet,
-        dateFieldName,
-        card.name,
-        periods.current
-      );
+      let chartDataCurrent, chartDataReference;
+      const cacheKey = `${card.name}-${state.selectedPeriod}`;
+      const cached = state.chartCache[cacheKey];
 
-      // Fetch chart data for reference period
-      const chartDataReference = await fetchBarChartData(
-        worksheet,
-        dateFieldName,
-        card.name,
-        periods.prevMonth
-      );
+      // Check cache: Must match period AND total value (to detect global filter changes)
+      // We use a small epsilon for float comparison
+      const isCacheValid = cached &&
+        Math.abs(cached.totalCurrent - card.current) < 0.01 &&
+        Math.abs(cached.totalReference - card.reference) < 0.01;
+
+      if (isCacheValid) {
+        console.log(`⚡ Using cached data for ${card.name}`);
+        chartDataCurrent = cached.dataCurrent;
+        chartDataReference = cached.dataReference;
+      } else {
+        // Fetch chart data for current period
+        chartDataCurrent = await fetchBarChartData(
+          worksheet,
+          dateFieldName,
+          card.name,
+          periods.current
+        );
+
+        // Fetch chart data for reference period
+        chartDataReference = await fetchBarChartData(
+          worksheet,
+          dateFieldName,
+          card.name,
+          periods.prevMonth
+        );
+
+        // Update cache
+        state.chartCache[cacheKey] = {
+          totalCurrent: card.current,
+          totalReference: card.reference,
+          dataCurrent: chartDataCurrent,
+          dataReference: chartDataReference
+        };
+      }
 
       // Replace skeleton with real chart
       const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
@@ -824,7 +849,11 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .attr('height', 0) // Start with 0 height
     .attr('fill', (d, i) => {
       const refVal = referenceData?.[i]?.value || 0;
-      return d.value > refVal ? '#4f46e5' : '#d97706';
+      const isGrowth = d.value > refVal;
+      // Normal: Growth = Blue (Good), Decline = Red (Bad)
+      // Unfavorable: Growth = Red (Bad), Decline = Blue (Good)
+      const isGood = isUnfavorable ? !isGrowth : isGrowth;
+      return isGood ? '#4f46e5' : '#ef4444';
     })
     .transition() // Simplified entrance animation
     .duration(400) // Shorter duration for better FPS
@@ -981,7 +1010,7 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
   const currentPath = svg.append('path')
     .datum(currentData)
     .attr('fill', 'none')
-    .attr('stroke', '#4f46e5') // Indigo-600
+    .attr('stroke', isUnfavorable ? '#ef4444' : '#4f46e5') // Red if unfavorable, else Indigo
     .attr('stroke-width', 2.5) // Slightly thicker for emphasis
     .attr('d', line);
 
@@ -998,7 +1027,7 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
   // Hover Dot (initially hidden)
   const hoverDot = svg.append('circle')
     .attr('r', 4)
-    .attr('fill', '#4f46e5')
+    .attr('fill', isUnfavorable ? '#ef4444' : '#4f46e5')
     .attr('stroke', '#fff')
     .attr('stroke-width', 2)
     .style('opacity', 0)
