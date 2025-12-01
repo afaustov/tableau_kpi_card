@@ -678,14 +678,36 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         console.log(`⚡ Using cached data for ${card.name}`);
         chartDataCurrent = cached.dataCurrent;
         chartDataReference = cached.dataReference;
+
+        // Render both at once from cache
+        const chartId = `chart-${card.name.replace(/\\s+/g, '-')}-${card.chartType}`;
+        if (chartDataCurrent && chartDataCurrent.length > 0) {
+          if (card.chartType === 'line') {
+            renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          } else {
+            renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          }
+          console.log(`✅ ${card.chartType} chart loaded for ${card.name}`);
+        }
       } else {
-        // Fetch chart data for current period
+        // Progressive loading: Fetch and render current period first
         chartDataCurrent = await fetchBarChartData(
           worksheet,
           dateFieldName,
           card.name,
           periods.current
         );
+
+        // Render current period immediately (without reference data)
+        const chartId = `chart-${card.name.replace(/\\s+/g, '-')}-${card.chartType}`;
+        if (chartDataCurrent && chartDataCurrent.length > 0) {
+          if (card.chartType === 'line') {
+            renderLineChart(chartId, chartDataCurrent, [], card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          } else {
+            renderBarChart(chartId, chartDataCurrent, [], card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          }
+          console.log(`✅ ${card.chartType} chart (current) rendered for ${card.name}`);
+        }
 
         // Fetch chart data for reference period
         chartDataReference = await fetchBarChartData(
@@ -695,6 +717,16 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           periods.prevMonth
         );
 
+        // Re-render with reference data
+        if (chartDataCurrent && chartDataCurrent.length > 0) {
+          if (card.chartType === 'line') {
+            renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          } else {
+            renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          }
+          console.log(`✅ ${card.chartType} chart (with reference) updated for ${card.name}`);
+        }
+
         // Update cache
         state.chartCache[cacheKey] = {
           totalCurrent: card.current,
@@ -702,17 +734,6 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           dataCurrent: chartDataCurrent,
           dataReference: chartDataReference
         };
-      }
-
-      // Replace skeleton with real chart
-      const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
-      if (chartDataCurrent && chartDataCurrent.length > 0) {
-        if (card.chartType === 'line') {
-          renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
-        } else {
-          renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
-        }
-        console.log(`✅ ${card.chartType} chart loaded for ${card.name}`);
       }
     } catch (e) {
       console.error(`❌ Failed to load chart for ${card.name}:`, e);
