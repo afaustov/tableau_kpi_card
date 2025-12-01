@@ -690,26 +690,9 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           console.log(`✅ ${card.chartType} chart loaded for ${card.name}`);
         }
       } else {
-        // Progressive loading: Fetch and render current period first
-        chartDataCurrent = await fetchBarChartData(
-          worksheet,
-          dateFieldName,
-          card.name,
-          periods.current
-        );
-
-        // Render current period immediately (without reference data)
         const chartId = `chart-${card.name.replace(/\\s+/g, '-')}-${card.chartType}`;
-        if (chartDataCurrent && chartDataCurrent.length > 0) {
-          if (card.chartType === 'line') {
-            renderLineChart(chartId, chartDataCurrent, [], card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
-          } else {
-            renderBarChart(chartId, chartDataCurrent, [], card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
-          }
-          console.log(`✅ ${card.chartType} chart (current) rendered for ${card.name}`);
-        }
 
-        // Fetch chart data for reference period
+        // Progressive loading: Fetch and render REFERENCE period first (gray bars)
         chartDataReference = await fetchBarChartData(
           worksheet,
           dateFieldName,
@@ -717,15 +700,29 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           periods.prevMonth
         );
 
-        // Re-render with reference data
-        if (chartDataCurrent && chartDataCurrent.length > 0) {
-          if (card.chartType === 'line') {
-            renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
-          } else {
-            renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
-          }
-          console.log(`✅ ${card.chartType} chart (with reference) updated for ${card.name}`);
+        // Render reference period first (pass empty array for current)
+        if (card.chartType === 'line') {
+          renderLineChart(chartId, [], chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+        } else {
+          renderBarChart(chartId, [], chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
         }
+        console.log(`✅ ${card.chartType} chart (reference) rendered for ${card.name}`);
+
+        // Fetch chart data for CURRENT period
+        chartDataCurrent = await fetchBarChartData(
+          worksheet,
+          dateFieldName,
+          card.name,
+          periods.current
+        );
+
+        // Re-render with both current and reference data
+        if (card.chartType === 'line') {
+          renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+        } else {
+          renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+        }
+        console.log(`✅ ${card.chartType} chart (complete) updated for ${card.name}`);
 
         // Update cache
         state.chartCache[cacheKey] = {
