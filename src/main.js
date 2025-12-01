@@ -825,8 +825,15 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .attr('preserveAspectRatio', 'xMidYMid meet'); // Preserve aspect, don't stretch text
 
   // X scale
+  // Combine dates from both datasets to ensure complete axis
+  const allDates = new Set([
+    ...currentData.map(d => d.date.getTime()),
+    ...(referenceData || []).map(d => d.date.getTime())
+  ]);
+  const sortedDates = Array.from(allDates).sort((a, b) => a - b).map(t => new Date(t));
+
   const x = d3.scaleBand()
-    .domain(currentData.map(d => d.date))
+    .domain(sortedDates)
     .range([margin.left, width - margin.right])
     .padding(0.2);
 
@@ -885,9 +892,9 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .attr('height', d => y(0) - y(d.value));
 
   // Axis Labels (Start and End Date)
-  if (currentData.length > 0) {
-    const startDate = currentData[0].date;
-    const endDate = currentData[currentData.length - 1].date;
+  if (sortedDates.length > 0) {
+    const startDate = sortedDates[0];
+    const endDate = sortedDates[sortedDates.length - 1];
     const formatDate = d3.timeFormat('%b %d');
 
     svg.append('text')
@@ -945,8 +952,14 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .attr('preserveAspectRatio', 'xMidYMid meet');
 
   // X scale (time)
+  // Combine dates to find full range
+  const allDates = [
+    ...currentData.map(d => d.date),
+    ...(referenceData || []).map(d => d.date)
+  ];
+
   const x = d3.scaleTime()
-    .domain([d3.min(currentData, d => d.date), d3.max(currentData, d => d.date)])
+    .domain(d3.extent(allDates))
     .range([margin.left, width - margin.right]);
 
   // Y scale - smart domain calculation to fit all values (positive and negative)
@@ -1039,14 +1052,15 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .style('pointer-events', 'none');
 
   // Axis labels
-  if (currentData.length > 0) {
+  const domain = x.domain();
+  if (domain && domain.length >= 2) {
     const formatDate = d3.timeFormat('%b %d');
     svg.append('text')
       .attr('x', margin.left)
       .attr('y', height - 5)
       .attr('font-size', '10px')
       .attr('fill', '#9ca3af')
-      .text(formatDate(currentData[0].date));
+      .text(formatDate(domain[0]));
 
     svg.append('text')
       .attr('x', width - margin.right)
@@ -1054,7 +1068,7 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
       .attr('text-anchor', 'end')
       .attr('font-size', '10px')
       .attr('fill', '#9ca3af')
-      .text(formatDate(currentData[currentData.length - 1].date));
+      .text(formatDate(domain[1]));
   }
 
   // --- Interaction Layer (Brush + Hover) ---
