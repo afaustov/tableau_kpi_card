@@ -130,7 +130,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 10);
     });
   } catch (err) {
-    showDebug('Init Error: ' + err.message);
+    // showDebug('Init Error: ' + err.message);
   }
 })
 
@@ -254,7 +254,7 @@ async function refreshKPIs(worksheet) {
       const spec = await worksheet.getVisualSpecificationAsync();
       const encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
 
-      showDebug(`🔍 Encodings: ${encodings.length} found`);
+      // showDebug(`🔍 Encodings: ${encodings.length} found`);
 
       const getFieldNames = id =>
         encodings.filter(e => e.id === id)
@@ -286,10 +286,10 @@ async function refreshKPIs(worksheet) {
       const dateFields = getFieldNames('date');
       dateFieldName = dateFields[0] || null;
 
-      showDebug(`🔍 Ordered Metrics: ${orderedMetrics.map(m => `${m.name}(${m.type})`).join(', ')}`);
-      showDebug(`🔍 Unfavorable: ${unfavorableFields.join(', ')}`);
-      showDebug(`🔍 Tooltip: ${tooltipFields.join(', ')}`);
-      showDebug(`🔍 Date: ${dateFieldName}`);
+      // showDebug(`🔍 Ordered Metrics: ${orderedMetrics.map(m => `${m.name}(${m.type})`).join(', ')}`);
+      // showDebug(`🔍 Unfavorable: ${unfavorableFields.join(', ')}`);
+      // showDebug(`🔍 Tooltip: ${tooltipFields.join(', ')}`);
+      // showDebug(`🔍 Date: ${dateFieldName}`);
 
       // Store encoding info in state for later use
       state.encodings = { barsFields, linesFields, unfavorableFields, tooltipFields, orderedMetrics };
@@ -300,14 +300,14 @@ async function refreshKPIs(worksheet) {
       const dateFilter = filters.find(f => f.columnType === 'continuous-date' || f.columnType === 'discrete-date' || f.fieldName.toLowerCase().includes('date'));
       if (dateFilter) {
         dateFieldName = dateFilter.fieldName;
-        showDebug(`🔍 Date (Filter): ${dateFieldName}`);
+        // showDebug(`🔍 Date (Filter): ${dateFieldName}`);
       } else {
-        showDebug(`⚠️ Filters checked: ${filters.map(f => `${f.fieldName} (${f.columnType})`).join(', ')}`);
+        // showDebug(`⚠️ Filters checked: ${filters.map(f => `${f.fieldName} (${f.columnType})`).join(', ')}`);
       }
     }
 
     if (!dateFieldName) {
-      showDebug('⚠️ No Date field found');
+      // showDebug('⚠️ No Date field found');
       const emptyState = document.getElementById('empty-state');
       emptyState.style.display = 'flex';
       document.getElementById('main-content').style.display = 'none';
@@ -323,7 +323,7 @@ async function refreshKPIs(worksheet) {
     if (metricFields.length === 0) {
       // Fallback: Try to guess metrics from summary data columns if visual spec failed
       const summary = await worksheet.getSummaryDataAsync({ maxRows: 1 });
-      showDebug(`🔍 Summary Cols: ${summary.columns.length}`);
+      // showDebug(`🔍 Summary Cols: ${summary.columns.length}`);
 
       const potentialMetrics = summary.columns
         .filter(c => c.dataType === 'float' || c.dataType === 'integer')
@@ -332,10 +332,10 @@ async function refreshKPIs(worksheet) {
 
       if (potentialMetrics.length > 0) {
         metricFields = potentialMetrics;
-        showDebug(`⚠️ Using fallback metrics: ${metricFields.join(', ')}`);
+        // showDebug(`⚠️ Using fallback metrics: ${metricFields.join(', ')}`);
       } else {
-        showDebug('⚠️ No Metrics found. Checked Spec and Summary.');
-        showDebug(`Cols: ${summary.columns.map(c => c.fieldName).join(', ')}`);
+        // showDebug('⚠️ No Metrics found. Checked Spec and Summary.');
+        // showDebug(`Cols: ${summary.columns.map(c => c.fieldName).join(', ')}`);
         document.getElementById('empty-state').style.display = 'flex';
         document.getElementById('main-content').style.display = 'none';
         return;
@@ -396,7 +396,7 @@ async function refreshKPIs(worksheet) {
 
         results[rangeLabel] = values;
       } catch (e) {
-        showDebug(`❌ Error: ${e.message}`);
+        // showDebug(`❌ Error: ${e.message}`);
         throw e;
       }
     };
@@ -454,7 +454,7 @@ async function refreshKPIs(worksheet) {
     state.lastStateHash = await computeStateHash(worksheet);
 
   } catch (e) {
-    showDebug('Refresh Error: ' + e.message);
+    // showDebug('Refresh Error: ' + e.message);
   } finally {
     state.isCalculating = false;
     state.isApplyingOwnFilters = false;
