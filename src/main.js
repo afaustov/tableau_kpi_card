@@ -286,10 +286,10 @@ async function refreshKPIs(worksheet) {
       const dateFields = getFieldNames('date');
       dateFieldName = dateFields[0] || null;
 
-      // showDebug(`🔍 Ordered Metrics: ${orderedMetrics.map(m => `${m.name}(${m.type})`).join(', ')}`);
-      // showDebug(`🔍 Unfavorable: ${unfavorableFields.join(', ')}`);
-      // showDebug(`🔍 Tooltip: ${tooltipFields.join(', ')}`);
-      // showDebug(`🔍 Date: ${dateFieldName}`);
+      // Add tooltip fields to metricFields so they are fetched
+      if (tooltipFields.length > 0) {
+        metricFields = [...new Set([...metricFields, ...tooltipFields])];
+      }
 
       // Store encoding info in state for later use
       state.encodings = { barsFields, linesFields, unfavorableFields, tooltipFields, orderedMetrics };
@@ -300,14 +300,10 @@ async function refreshKPIs(worksheet) {
       const dateFilter = filters.find(f => f.columnType === 'continuous-date' || f.columnType === 'discrete-date' || f.fieldName.toLowerCase().includes('date'));
       if (dateFilter) {
         dateFieldName = dateFilter.fieldName;
-        // showDebug(`🔍 Date (Filter): ${dateFieldName}`);
-      } else {
-        // showDebug(`⚠️ Filters checked: ${filters.map(f => `${f.fieldName} (${f.columnType})`).join(', ')}`);
       }
     }
 
     if (!dateFieldName) {
-      // showDebug('⚠️ No Date field found');
       const emptyState = document.getElementById('empty-state');
       emptyState.style.display = 'flex';
       document.getElementById('main-content').style.display = 'none';
@@ -323,7 +319,6 @@ async function refreshKPIs(worksheet) {
     if (metricFields.length === 0) {
       // Fallback: Try to guess metrics from summary data columns if visual spec failed
       const summary = await worksheet.getSummaryDataAsync({ maxRows: 1 });
-      // showDebug(`🔍 Summary Cols: ${summary.columns.length}`);
 
       const potentialMetrics = summary.columns
         .filter(c => c.dataType === 'float' || c.dataType === 'integer')
@@ -332,10 +327,7 @@ async function refreshKPIs(worksheet) {
 
       if (potentialMetrics.length > 0) {
         metricFields = potentialMetrics;
-        // showDebug(`⚠️ Using fallback metrics: ${metricFields.join(', ')}`);
       } else {
-        // showDebug('⚠️ No Metrics found. Checked Spec and Summary.');
-        // showDebug(`Cols: ${summary.columns.map(c => c.fieldName).join(', ')}`);
         document.getElementById('empty-state').style.display = 'flex';
         document.getElementById('main-content').style.display = 'none';
         return;
@@ -396,7 +388,6 @@ async function refreshKPIs(worksheet) {
 
         results[rangeLabel] = values;
       } catch (e) {
-        // showDebug(`❌ Error: ${e.message}`);
         throw e;
       }
     };
@@ -418,6 +409,19 @@ async function refreshKPIs(worksheet) {
       const refVal = prevMObj?.val || 0;
       const isUnfavorable = state.encodings.unfavorableFields.includes(mName);
 
+      // Collect tooltip values
+      const tooltipValues = {};
+      if (state.encodings.tooltipFields) {
+        state.encodings.tooltipFields.forEach(tf => {
+          tooltipValues[tf] = {
+            current: results.current?.[tf]?.val || 0,
+            prevMonth: results.prevMonth?.[tf]?.val || 0,
+            prevYear: results.prevYear?.[tf]?.val || 0,
+            fmt: results.current?.[tf]?.fmt || ''
+          };
+        });
+      }
+
       return {
         name: mName,
         current: curVal,
@@ -429,7 +433,8 @@ async function refreshKPIs(worksheet) {
         dateFieldName,
         chartType, // 'bar' or 'line'
         isUnfavorable,
-        tooltipFields: state.encodings.tooltipFields
+        tooltipFields: state.encodings.tooltipFields,
+        tooltipValues // Pass collected values
       };
     }
 
@@ -644,9 +649,9 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
         if (chartDataCurrent && chartDataCurrent.length > 0) {
           if (card.chartType === 'line') {
-            renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+            renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
           } else {
-            renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+            renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
           }
         }
       } else {
@@ -657,14 +662,15 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           worksheet,
           dateFieldName,
           card.name,
-          periods.prevMonth
+          periods.prevMonth,
+          card.tooltipFields // Pass tooltip fields
         );
 
         // Render reference period first (pass empty array for current)
         if (card.chartType === 'line') {
-          renderLineChart(chartId, [], chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          renderLineChart(chartId, [], chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
         } else {
-          renderBarChart(chartId, [], chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          renderBarChart(chartId, [], chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
         }
 
         // Fetch chart data for CURRENT period
@@ -672,14 +678,15 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           worksheet,
           dateFieldName,
           card.name,
-          periods.current
+          periods.current,
+          card.tooltipFields // Pass tooltip fields
         );
 
         // Re-render with both current and reference data
         if (card.chartType === 'line') {
-          renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
         } else {
-          renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
+          renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
         }
 
         // Update cache
@@ -696,7 +703,7 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
 
 }
 
-async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
+async function fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields = []) {
   try {
     const dataPoints = [];
     const startDate = new Date(range.start);
@@ -718,17 +725,40 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
       const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
       const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
 
+      // Find indices for tooltip fields
+      const tooltipIndices = tooltipFields.map(tf => ({
+        name: tf,
+        index: summary.columns.findIndex(c => c.fieldName === tf)
+      }));
+
       let dailyValue = 0;
+      const dailyTooltipValues = {};
+      tooltipFields.forEach(tf => dailyTooltipValues[tf] = { val: 0, fmt: '' });
+
       if (metricIndex !== -1) {
         summary.data.forEach(row => {
           const val = row[metricIndex].nativeValue;
           if (typeof val === 'number') dailyValue += val;
+
+          // Aggregate tooltip fields
+          tooltipIndices.forEach(ti => {
+            if (ti.index !== -1) {
+              const tVal = row[ti.index].nativeValue;
+              if (typeof tVal === 'number') {
+                dailyTooltipValues[ti.name].val += tVal;
+              }
+              if (!dailyTooltipValues[ti.name].fmt && row[ti.index].formattedValue) {
+                dailyTooltipValues[ti.name].fmt = row[ti.index].formattedValue;
+              }
+            }
+          });
         });
       }
 
       dataPoints.push({
         date: new Date(dayStart),
-        value: dailyValue
+        value: dailyValue,
+        tooltipValues: dailyTooltipValues
       });
     }
 
@@ -741,7 +771,7 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
   }
 }
 
-function renderBarChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable) {
+function renderBarChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable, tooltipFields = []) {
   const container = document.getElementById(elementId);
   if (!container) return;
 
@@ -877,13 +907,14 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     isPercentage,
     isUnfavorable,
     'bar',
-    elementId
+    elementId,
+    tooltipFields
   );
 }
 
 // Render line chart for metric
 // Render line chart for metric
-function renderLineChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable) {
+function renderLineChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable, tooltipFields = []) {
   const container = document.getElementById(elementId);
   if (!container) return;
 
@@ -1042,13 +1073,14 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     isPercentage,
     isUnfavorable,
     'line',
-    elementId
+    elementId,
+    tooltipFields
   );
 }
 
 // -------------------- Interaction Logic (Brush & Hover) --------------------
 
-function setupBrushInteraction(svg, width, height, margin, x, data, refData, metricName, isPct, isUnfavorable, chartType, elementId) {
+function setupBrushInteraction(svg, width, height, margin, x, data, refData, metricName, isPct, isUnfavorable, chartType, elementId, tooltipFields = []) {
   const brush = d3.brushX()
     .extent([[margin.left, 0], [width - margin.right, height - margin.bottom]])
     .on('start brush end', brushed);
@@ -1108,7 +1140,7 @@ function setupBrushInteraction(svg, width, height, margin, x, data, refData, met
 
       // 3. Show Aggregated Tooltip
       if (selectedData.length > 0) {
-        updateAggregatedTooltip(event.sourceEvent, selectedData, selectedIndices, refData, metricName, isPct, isUnfavorable);
+        updateAggregatedTooltip(event.sourceEvent, selectedData, selectedIndices, refData, metricName, isPct, isUnfavorable, tooltipFields);
       } else {
         hideTooltip();
       }
@@ -1163,7 +1195,7 @@ function setupBrushInteraction(svg, width, height, margin, x, data, refData, met
       // (See modification in the listener above)
 
       // Actually, let's just use the standard tooltip logic
-      showTooltipForBar(lastEvent, d.date, d.value, refVal, metricName, isPct, isUnfavorable);
+      showTooltipForBar(lastEvent, d.date, d.value, refVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
 
       // Highlight single item
       highlightSelection([index]);
@@ -1241,7 +1273,7 @@ function setupBrushInteraction(svg, width, height, margin, x, data, refData, met
   }
 }
 
-function updateAggregatedTooltip(event, selectedData, selectedIndices, refData, metricName, isPct, isUnfavorable) {
+function updateAggregatedTooltip(event, selectedData, selectedIndices, refData, metricName, isPct, isUnfavorable, tooltipFields = []) {
   // Calculate Aggregates
   const sumCurrent = d3.sum(selectedData, d => d.value);
   const sumRef = d3.sum(selectedIndices, i => refData ? (refData[i]?.value || 0) : 0);
@@ -1265,6 +1297,25 @@ function updateAggregatedTooltip(event, selectedData, selectedIndices, refData, 
 
   const deltaValue = isPct ? `${sign}${(diff * 100).toFixed(1)} pp` : `${sign}${formatNumber(Math.abs(diff), false)}`;
   const pctStr = `${sign}${pct.toFixed(1)}%`;
+
+  // Aggregate extra tooltip fields
+  let extraFieldsHtml = '';
+  if (tooltipFields.length > 0) {
+    extraFieldsHtml += '<div class="tooltip-divider"></div>';
+    tooltipFields.forEach(tf => {
+      const sumTf = d3.sum(selectedData, d => d.tooltipValues?.[tf]?.val || 0);
+      // Use formatting from first item if available, else standard number format
+      const fmt = selectedData[0]?.tooltipValues?.[tf]?.fmt;
+      // If we have a format string, we can't easily apply it to a sum without a formatter library.
+      // So we'll just use formatNumber(sum, false) for now, unless we want to try to infer percentage.
+      // Or we can just show the raw number formatted.
+      extraFieldsHtml += `
+        <div class="tooltip-row">
+            <span class="tooltip-label">${tf}:</span>
+            <span class="tooltip-value">${formatNumber(sumTf, false)}</span>
+        </div>`;
+    });
+  }
 
   const content = `
     <div class="tooltip-header">${metricName} (Selected)</div>
@@ -1293,6 +1344,7 @@ function updateAggregatedTooltip(event, selectedData, selectedIndices, refData, 
                 ${triangle} ${pctStr} <span class="tooltip-divider">|</span> ${deltaValue}
             </span>
         </div>
+        ${extraFieldsHtml}
     </div>
   `;
 
@@ -1401,6 +1453,23 @@ function generateTooltipContent(metric) {
     return diff >= 0 ? 'positive' : 'negative';
   };
 
+  let extraFieldsHtml = '';
+  if (metric.tooltipFields && metric.tooltipFields.length > 0 && metric.tooltipValues) {
+    extraFieldsHtml += '<div class="tooltip-divider"></div><div class="tooltip-section">';
+    metric.tooltipFields.forEach(tf => {
+      const valObj = metric.tooltipValues[tf];
+      const val = valObj ? valObj.current : 0;
+      const fmt = valObj ? valObj.fmt : '';
+      const displayVal = fmt || formatNumber(val, false);
+      extraFieldsHtml += `
+        <div class="tooltip-row">
+            <span class="tooltip-label">${tf}:</span>
+            <span class="tooltip-value">${displayVal}</span>
+        </div>`;
+    });
+    extraFieldsHtml += '</div>';
+  }
+
   return `
     <div class="tooltip-header">${metric.name}</div>
     <div class="tooltip-section">
@@ -1421,17 +1490,18 @@ function generateTooltipContent(metric) {
       <div class="tooltip-row"><span class="tooltip-label">Value:</span><span class="tooltip-value">${formatNumber(metric.prevYear, metric.isPercentage)}</span></div>
       <div class="tooltip-row"><span class="tooltip-label">Δ:</span><span class="tooltip-value ${getColorClass(yoyDiff)}">${formatDelta(yoyDiff, yoyPct, metric.isPercentage)}</span></div>
     </div>
+    ${extraFieldsHtml}
   `;
 }
 
-function showTooltipForBar(e, date, currentVal, refVal, metricName, isPercentage, isUnfavorable = false) {
-  tooltip.innerHTML = generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage, isUnfavorable);
+function showTooltipForBar(e, date, currentVal, refVal, metricName, isPercentage, isUnfavorable = false, tooltipFields = [], tooltipValues = {}) {
+  tooltip.innerHTML = generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage, isUnfavorable, tooltipFields, tooltipValues);
   tooltip.classList.remove('hidden');
   lastEvent = e;
   updateTooltipPosition();
 }
 
-function generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage, isUnfavorable = false) {
+function generateBarTooltipContent(date, currentVal, refVal, metricName, isPercentage, isUnfavorable = false, tooltipFields = [], tooltipValues = {}) {
   const diff = currentVal - refVal;
   const pct = refVal ? (diff / refVal) * 100 : 0;
   const formatDate = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -1445,6 +1515,22 @@ function generateBarTooltipContent(date, currentVal, refVal, metricName, isPerce
 
   const deltaValue = isPercentage ? `${sign}${(diff * 100).toFixed(1)} pp` : `${sign}${formatNumber(Math.abs(diff), false)}`;
   const pctStr = `${sign}${pct.toFixed(1)}%`;
+
+  let extraFieldsHtml = '';
+  if (tooltipFields.length > 0) {
+    extraFieldsHtml += '<div class="tooltip-divider"></div>';
+    tooltipFields.forEach(tf => {
+      const valObj = tooltipValues[tf];
+      const val = valObj ? valObj.val : 0;
+      const fmt = valObj ? valObj.fmt : '';
+      const displayVal = fmt || formatNumber(val, false);
+      extraFieldsHtml += `
+        <div class="tooltip-row">
+            <span class="tooltip-label">${tf}:</span>
+            <span class="tooltip-value">${displayVal}</span>
+        </div>`;
+    });
+  }
 
   return `
         <div class="tooltip-header">${metricName}</div>
@@ -1469,6 +1555,7 @@ function generateBarTooltipContent(date, currentVal, refVal, metricName, isPerce
                     ${triangle} ${pctStr} <span class="tooltip-divider">|</span> ${deltaValue}
                 </span>
             </div>
+            ${extraFieldsHtml}
         </div>
     `;
 }
