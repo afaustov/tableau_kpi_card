@@ -733,7 +733,8 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
 
       let dailyValue = 0;
       const dailyTooltipValues = {};
-      tooltipFields.forEach(tf => dailyTooltipValues[tf] = { val: 0, fmt: '' });
+      // Initialize with null to distinguish between 0 and no data/string
+      tooltipFields.forEach(tf => dailyTooltipValues[tf] = { val: null, fmt: '' });
 
       if (metricIndex !== -1) {
         summary.data.forEach(row => {
@@ -744,9 +745,16 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
           tooltipIndices.forEach(ti => {
             if (ti.index !== -1) {
               const tVal = row[ti.index].nativeValue;
+
               if (typeof tVal === 'number') {
+                // If it's a number, sum it (initialize if null)
+                if (dailyTooltipValues[ti.name].val === null) dailyTooltipValues[ti.name].val = 0;
                 dailyTooltipValues[ti.name].val += tVal;
+              } else {
+                // If it's a string/other, just take the value (last one wins)
+                dailyTooltipValues[ti.name].val = tVal;
               }
+
               if (!dailyTooltipValues[ti.name].fmt && row[ti.index].formattedValue) {
                 dailyTooltipValues[ti.name].fmt = row[ti.index].formattedValue;
               }
@@ -1303,16 +1311,35 @@ function updateAggregatedTooltip(event, selectedData, selectedIndices, refData, 
   if (tooltipFields.length > 0) {
     extraFieldsHtml += '<div class="tooltip-divider"></div>';
     tooltipFields.forEach(tf => {
-      const sumTf = d3.sum(selectedData, d => d.tooltipValues?.[tf]?.val || 0);
-      // Use formatting from first item if available, else standard number format
-      const fmt = selectedData[0]?.tooltipValues?.[tf]?.fmt;
-      // If we have a format string, we can't easily apply it to a sum without a formatter library.
-      // So we'll just use formatNumber(sum, false) for now, unless we want to try to infer percentage.
-      // Or we can just show the raw number formatted.
+      // Check type of first item to decide aggregation strategy
+      const firstVal = selectedData[0]?.tooltipValues?.[tf]?.val;
+      let displayVal = '';
+
+      if (typeof firstVal === 'number') {
+        const sumTf = d3.sum(selectedData, d => d.tooltipValues?.[tf]?.val || 0);
+        displayVal = formatNumber(sumTf, false);
+      } else {
+        // For strings, show unique values or just the first one
+        // Let's show the first one for simplicity, or "Multiple" if they differ
+        const uniqueVals = [...new Set(selectedData.map(d => d.tooltipValues?.[tf]?.val).filter(v => v !== null && v !== undefined))];
+        if (uniqueVals.length === 1) {
+          displayVal = uniqueVals[0];
+        } else if (uniqueVals.length > 1) {
+          displayVal = `${uniqueVals[0]}...`; // Indicate multiple
+        } else {
+          displayVal = '-';
+        }
+      }
+
+      // Use formatted value if available and it's a single value scenario
+      if (selectedData.length === 1 && selectedData[0]?.tooltipValues?.[tf]?.fmt) {
+        displayVal = selectedData[0].tooltipValues[tf].fmt;
+      }
+
       extraFieldsHtml += `
         <div class="tooltip-row">
             <span class="tooltip-label">${tf}:</span>
-            <span class="tooltip-value">${formatNumber(sumTf, false)}</span>
+            <span class="tooltip-value">${displayVal}</span>
         </div>`;
     });
   }
@@ -1521,9 +1548,18 @@ function generateBarTooltipContent(date, currentVal, refVal, metricName, isPerce
     extraFieldsHtml += '<div class="tooltip-divider"></div>';
     tooltipFields.forEach(tf => {
       const valObj = tooltipValues[tf];
-      const val = valObj ? valObj.val : 0;
+      const val = valObj ? valObj.val : null;
       const fmt = valObj ? valObj.fmt : '';
-      const displayVal = fmt || formatNumber(val, false);
+
+      let displayVal = '';
+      if (val === null || val === undefined) {
+        displayVal = '-';
+      } else if (typeof val === 'number') {
+        displayVal = fmt || formatNumber(val, false);
+      } else {
+        displayVal = val;
+      }
+
       extraFieldsHtml += `
         <div class="tooltip-row">
             <span class="tooltip-label">${tf}:</span>
