@@ -39,30 +39,7 @@ function initializeControls() {
   state.weekStart = 'monday';
   state.rollingCount = 30;
 
-  updateGranularityOptions();
   updateControlsVisibility();
-}
-
-// Update granularity dropdown based on selected period
-function updateGranularityOptions() {
-  const granularitySelect = document.getElementById('granularity-select');
-  const period = state.selectedPeriod;
-  const options = granularityConfig[period] || [];
-
-  granularitySelect.innerHTML = '';
-
-  options.forEach((option, index) => {
-    const opt = document.createElement('option');
-    opt.value = option;
-    opt.textContent = option.charAt(0).toUpperCase() + option.slice(1);
-    granularitySelect.appendChild(opt);
-
-    // Select first option by default
-    if (index === 0) {
-      state.granularity = option;
-      opt.selected = true;
-    }
-  });
 }
 
 // Update visibility of week-start and rolling controls
@@ -180,16 +157,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     initializeControls();
 
     // UI listeners for controls
-    document.getElementById('period-select').addEventListener('change', e => {
-      state.selectedPeriod = e.target.value;
-      updateGranularityOptions();
-      updateControlsVisibility();
-      state.lastStateHash = null;
-      refreshKPIs(worksheet);
-    });
-
-    document.getElementById('granularity-select').addEventListener('change', e => {
-      state.granularity = e.target.value;
+    document.getElementById('period-granularity-select').addEventListener('change', e => {
+      const [period, granularity] = e.target.value.split('|');
+      state.selectedPeriod = period;
+      state.granularity = granularity;
       updateControlsVisibility();
       state.lastStateHash = null;
       refreshKPIs(worksheet);

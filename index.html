@@ -36,20 +36,23 @@
         <!-- Controls Container (Top Right) -->
         <div id="controls-container" class="controls-container">
 
-          <!-- Period -->
+          <!-- Combined Period & Granularity -->
           <div class="control-group">
-            <select id="period-select" class="control-select">
-              <option value="mtd">MTD</option>
-              <option value="qtd">QTD</option>
-              <option value="ytd">YTD</option>
-              <option value="rolling" selected>Rolling</option>
-            </select>
-          </div>
-
-          <!-- Granularity -->
-          <div class="control-group">
-            <select id="granularity-select" class="control-select">
-              <!-- Populated dynamically -->
+            <select id="period-granularity-select" class="control-select">
+              <!-- MTD -->
+              <option value="mtd|days">MTD - Days</option>
+              <option value="mtd|weeks">MTD - Weeks</option>
+              <!-- QTD -->
+              <option value="qtd|weeks">QTD - Weeks</option>
+              <option value="qtd|months">QTD - Months</option>
+              <!-- YTD -->
+              <option value="ytd|months">YTD - Months</option>
+              <option value="ytd|quarters">YTD - Quarters</option>
+              <!-- Rolling -->
+              <option value="rolling|days" selected>Rolling - Days</option>
+              <option value="rolling|months">Rolling - Months</option>
+              <option value="rolling|quarters">Rolling - Quarters</option>
+              <option value="rolling|years">Rolling - Years</option>
             </select>
           </div>
 
