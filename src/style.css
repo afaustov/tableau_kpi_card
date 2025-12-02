@@ -28,7 +28,30 @@ body {
   flex-direction: column;
 }
 
-.period-selector-minimal {
+.controls-container {
+  position: absolute;
+  top: 10px;
+  right: 20px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 4px;
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+}
+
+.control-group.hidden {
+  display: none !important;
+}
+
+.control-select {
   background: #f3f4f6;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -37,20 +60,66 @@ body {
   cursor: pointer;
   outline: none;
   font-weight: 500;
-  text-align: left;
+  padding: 6px 24px 6px 12px;
   appearance: none;
   -webkit-appearance: none;
-  padding: 6px 24px 6px 12px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23374151' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
   background-size: 12px;
-  transition: background 0.2s ease;
+  transition: all 0.2s ease;
+  min-width: 80px;
 }
 
-.period-selector-minimal:hover {
-  background: #e5e7eb;
+.control-select:hover {
+  background-color: #e5e7eb;
   border-color: #d1d5db;
+}
+
+.control-slider {
+  width: 80px;
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.control-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.control-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.control-input-number {
+  width: 40px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: center;
+  outline: none;
+  background: #f9fafb;
+}
+
+.control-input-number:focus {
+  border-color: var(--accent-color);
+  background: #fff;
 }
 
 .kpi-grid {
@@ -61,7 +130,7 @@ body {
   height: 100vh;
   width: 100%;
   overflow-y: auto;
-  padding: 20px;
+  padding: 60px 20px 20px;
   box-sizing: border-box;
   align-content: start;
 }

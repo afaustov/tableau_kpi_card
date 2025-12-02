@@ -4,7 +4,10 @@ import * as d3 from 'd3';
 // -------------------- State --------------------
 let state = {
   metrics: [],
-  selectedPeriod: 'mtd',
+  selectedPeriod: 'rolling',
+  granularity: 'days',
+  weekStart: 'monday',
+  rollingCount: 30,
   isCalculating: false,
   isApplyingOwnFilters: false,
   unregisterDataHandler: null,
@@ -12,6 +15,85 @@ let state = {
   lastStateHash: null, // Hash to detect real changes
   chartCache: {} // Cache for chart data to avoid re-fetching
 };
+
+// Granularity options for each period
+const granularityConfig = {
+  mtd: ['days', 'weeks'],
+  qtd: ['weeks', 'months'],
+  ytd: ['months', 'quarters'],
+  rolling: ['days', 'months', 'quarters', 'years']
+};
+
+// Default rolling counts for each granularity
+const rollingDefaults = {
+  days: 30,
+  months: 12,
+  quarters: 4,
+  years: 4
+};
+
+// Initialize controls
+function initializeControls() {
+  state.selectedPeriod = 'rolling';
+  state.granularity = 'days';
+  state.weekStart = 'monday';
+  state.rollingCount = 30;
+
+  updateGranularityOptions();
+  updateControlsVisibility();
+}
+
+// Update granularity dropdown based on selected period
+function updateGranularityOptions() {
+  const granularitySelect = document.getElementById('granularity-select');
+  const period = state.selectedPeriod;
+  const options = granularityConfig[period] || [];
+
+  granularitySelect.innerHTML = '';
+
+  options.forEach((option, index) => {
+    const opt = document.createElement('option');
+    opt.value = option;
+    opt.textContent = option.charAt(0).toUpperCase() + option.slice(1);
+    granularitySelect.appendChild(opt);
+
+    // Select first option by default
+    if (index === 0) {
+      state.granularity = option;
+      opt.selected = true;
+    }
+  });
+}
+
+// Update visibility of week-start and rolling controls
+function updateControlsVisibility() {
+  const weekStartGroup = document.getElementById('week-start-group');
+  const rollingControls = document.getElementById('rolling-controls');
+  const rollingSlider = document.getElementById('rolling-slider');
+  const rollingInput = document.getElementById('rolling-input');
+
+  // Show week-start only if granularity is 'weeks'
+  if (state.granularity === 'weeks') {
+    weekStartGroup.classList.remove('hidden');
+  } else {
+    weekStartGroup.classList.add('hidden');
+  }
+
+  // Show rolling controls only if period is 'rolling'
+  if (state.selectedPeriod === 'rolling') {
+    rollingControls.classList.remove('hidden');
+
+    // Update rolling count default based on granularity
+    const defaultCount = rollingDefaults[state.granularity] || 30;
+    const maxCount = 30;
+
+    rollingSlider.value = defaultCount;
+    rollingInput.value = defaultCount;
+    state.rollingCount = defaultCount;
+  } else {
+    rollingControls.classList.add('hidden');
+  }
+}
 
 
 // -------------------- Helpers --------------------
@@ -30,10 +112,30 @@ function getRange(period, anchorDate) {
     start = new Date(Date.UTC(year, qStart, 1, 0, 0, 0, 0));
   } else if (period === 'ytd') {
     start = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
-  } else if (period === 'rolling_30') {
+  } else if (period === 'rolling') {
+    // Rolling period based on granularity and count
     const endDateUTC = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
     start = new Date(endDateUTC);
-    start.setDate(start.getDate() - 29);
+
+    const count = state.rollingCount || 30;
+    const granularity = state.granularity || 'days';
+
+    if (granularity === 'days') {
+      start.setDate(start.getDate() - (count - 1));
+    } else if (granularity === 'months') {
+      start.setMonth(start.getMonth() - (count - 1));
+      start.setDate(1); // Start from beginning of month
+    } else if (granularity === 'quarters') {
+      start.setMonth(start.getMonth() - ((count - 1) * 3));
+      // Round to quarter start
+      const qStart = Math.floor(start.getMonth() / 3) * 3;
+      start.setMonth(qStart);
+      start.setDate(1);
+    } else if (granularity === 'years') {
+      start.setFullYear(start.getFullYear() - (count - 1));
+      start.setMonth(0);
+      start.setDate(1);
+    }
   }
 
   return { start, end };
@@ -74,10 +176,49 @@ document.addEventListener('DOMContentLoaded', async () => {
     await window.tableau.extensions.initializeAsync();
     const worksheet = window.tableau.extensions.worksheetContent.worksheet;
 
-    // UI listeners
-    document.getElementById('period-selector').addEventListener('change', e => {
+    // Initialize controls
+    initializeControls();
+
+    // UI listeners for controls
+    document.getElementById('period-select').addEventListener('change', e => {
       state.selectedPeriod = e.target.value;
-      // Reset hash to ensure refresh happens
+      updateGranularityOptions();
+      updateControlsVisibility();
+      state.lastStateHash = null;
+      refreshKPIs(worksheet);
+    });
+
+    document.getElementById('granularity-select').addEventListener('change', e => {
+      state.granularity = e.target.value;
+      updateControlsVisibility();
+      state.lastStateHash = null;
+      refreshKPIs(worksheet);
+    });
+
+    document.getElementById('week-start-select').addEventListener('change', e => {
+      state.weekStart = e.target.value;
+      state.lastStateHash = null;
+      refreshKPIs(worksheet);
+    });
+
+    const rollingSlider = document.getElementById('rolling-slider');
+    const rollingInput = document.getElementById('rolling-input');
+
+    rollingSlider.addEventListener('input', e => {
+      const value = parseInt(e.target.value);
+      rollingInput.value = value;
+      state.rollingCount = value;
+    });
+
+    rollingInput.addEventListener('input', e => {
+      let value = parseInt(e.target.value) || 4;
+      value = Math.max(4, Math.min(30, value));
+      e.target.value = value;
+      rollingSlider.value = value;
+      state.rollingCount = value;
+    });
+
+    rollingInput.addEventListener('change', () => {
       state.lastStateHash = null;
       refreshKPIs(worksheet);
     });

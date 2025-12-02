@@ -33,14 +33,40 @@
       <!-- Main Content (Hidden by default) -->
       <div id="main-content" style="display: none; flex-direction: column; height: 100%; position: relative;">
 
-        <!-- Period Selector (Top Right) -->
-        <div style="position: absolute; top: 0; right: 0; z-index: 10;">
-          <select id="period-selector" class="period-selector-minimal">
-            <option value="mtd">MTD</option>
-            <option value="qtd">QTD</option>
-            <option value="ytd">YTD</option>
-            <option value="rolling_30">Rolling 30 Days</option>
-          </select>
+        <!-- Controls Container (Top Right) -->
+        <div id="controls-container" class="controls-container">
+
+          <!-- Period -->
+          <div class="control-group">
+            <select id="period-select" class="control-select">
+              <option value="mtd">MTD</option>
+              <option value="qtd">QTD</option>
+              <option value="ytd">YTD</option>
+              <option value="rolling" selected>Rolling</option>
+            </select>
+          </div>
+
+          <!-- Granularity -->
+          <div class="control-group">
+            <select id="granularity-select" class="control-select">
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+
+          <!-- Week Start (Hidden by default) -->
+          <div id="week-start-group" class="control-group hidden">
+            <select id="week-start-select" class="control-select">
+              <option value="monday">Mon</option>
+              <option value="sunday">Sun</option>
+            </select>
+          </div>
+
+          <!-- Rolling Controls (Hidden by default) -->
+          <div id="rolling-controls" class="control-group" style="display: flex; align-items: center; gap: 8px;">
+            <input type="range" id="rolling-slider" min="4" max="30" value="30" class="control-slider">
+            <input type="number" id="rolling-input" min="4" max="30" value="30" class="control-input-number">
+          </div>
+
         </div>
 
         <!-- KPI Cards Container -->
