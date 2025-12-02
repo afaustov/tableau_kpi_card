@@ -144,7 +144,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 10);
     });
   } catch (err) {
-    console.error('Initialization failed:', err);
     showDebug('Init Error: ' + err.message);
   }
 })
@@ -176,7 +175,6 @@ async function checkForChanges(worksheet) {
 
     return hasChanges;
   } catch (e) {
-    console.error('Error checking for changes:', e);
     // If we can't check, assume there are changes to be safe
     return true;
   }
@@ -248,7 +246,6 @@ async function computeStateHash(worksheet) {
 
     return hashParts.join('::');
   } catch (e) {
-    console.error('Error computing state hash:', e);
     return Date.now().toString(); // Fallback to always refresh on error
   }
 }
@@ -488,7 +485,6 @@ async function refreshKPIs(worksheet) {
     state.lastStateHash = await computeStateHash(worksheet);
 
   } catch (e) {
-    console.error('Refresh Error:', e);
     showDebug('Refresh Error: ' + e.message);
   } finally {
     state.isCalculating = false;
@@ -677,7 +673,7 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         chartDataReference = cached.dataReference;
 
         // Render both at once from cache
-        const chartId = `chart-${card.name.replace(/\\s+/g, '-')}-${card.chartType}`;
+        const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
         if (chartDataCurrent && chartDataCurrent.length > 0) {
           if (card.chartType === 'line') {
             renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
@@ -686,7 +682,7 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           }
         }
       } else {
-        const chartId = `chart-${card.name.replace(/\\s+/g, '-')}-${card.chartType}`;
+        const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
 
         // Progressive loading: Fetch and render REFERENCE period first (gray bars)
         chartDataReference = await fetchBarChartData(
@@ -727,7 +723,6 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         };
       }
     } catch (e) {
-      console.error(`❌ Failed to load chart for ${card.name}:`, e);
     }
   }
 
@@ -774,7 +769,6 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
     return dataPoints;
 
   } catch (e) {
-    console.warn(`Error fetching chart data for ${metricField}:`, e);
     return [];
   }
 }
