@@ -40,19 +40,27 @@
           <div class="control-group">
             <select id="period-granularity-select" class="control-select">
               <!-- MTD -->
-              <option value="mtd|days">MTD - Days</option>
-              <option value="mtd|weeks">MTD - Weeks</option>
+              <optgroup label="MTD">
+                <option value="mtd|days">Days</option>
+                <option value="mtd|weeks">Weeks</option>
+              </optgroup>
               <!-- QTD -->
-              <option value="qtd|weeks">QTD - Weeks</option>
-              <option value="qtd|months">QTD - Months</option>
+              <optgroup label="QTD">
+                <option value="qtd|weeks">Weeks</option>
+                <option value="qtd|months">Months</option>
+              </optgroup>
               <!-- YTD -->
-              <option value="ytd|months">YTD - Months</option>
-              <option value="ytd|quarters">YTD - Quarters</option>
+              <optgroup label="YTD">
+                <option value="ytd|months">Months</option>
+                <option value="ytd|quarters">Quarters</option>
+              </optgroup>
               <!-- Rolling -->
-              <option value="rolling|days" selected>Rolling - Days</option>
-              <option value="rolling|months">Rolling - Months</option>
-              <option value="rolling|quarters">Rolling - Quarters</option>
-              <option value="rolling|years">Rolling - Years</option>
+              <optgroup label="Rolling">
+                <option value="rolling|days" selected>Days</option>
+                <option value="rolling|months">Months</option>
+                <option value="rolling|quarters">Quarters</option>
+                <option value="rolling|years">Years</option>
+              </optgroup>
             </select>
           </div>
 
