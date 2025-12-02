@@ -658,11 +658,9 @@ function renderSkeletonLineChart(elementId) {
 
 // Lazy load charts (bars and lines) in background
 async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
-  console.time('⏱️ Load Charts (Async)');
 
   for (const card of cards) {
     try {
-      console.log(`📊 Loading ${card.chartType} chart for ${card.name}...`);
 
       let chartDataCurrent, chartDataReference;
       const cacheKey = `${card.name}-${state.selectedPeriod}`;
@@ -675,7 +673,6 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         Math.abs(cached.totalReference - card.reference) < 0.01;
 
       if (isCacheValid) {
-        console.log(`⚡ Using cached data for ${card.name}`);
         chartDataCurrent = cached.dataCurrent;
         chartDataReference = cached.dataReference;
 
@@ -687,7 +684,6 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           } else {
             renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
           }
-          console.log(`✅ ${card.chartType} chart loaded for ${card.name}`);
         }
       } else {
         const chartId = `chart-${card.name.replace(/\\s+/g, '-')}-${card.chartType}`;
@@ -706,7 +702,6 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         } else {
           renderBarChart(chartId, [], chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
         }
-        console.log(`✅ ${card.chartType} chart (reference) rendered for ${card.name}`);
 
         // Fetch chart data for CURRENT period
         chartDataCurrent = await fetchBarChartData(
@@ -722,7 +717,6 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         } else {
           renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable);
         }
-        console.log(`✅ ${card.chartType} chart (complete) updated for ${card.name}`);
 
         // Update cache
         state.chartCache[cacheKey] = {
@@ -737,7 +731,6 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
     }
   }
 
-  console.timeEnd('⏱️ Load Charts (Async)');
 }
 
 async function fetchBarChartData(worksheet, dateFieldName, metricField, range) {
@@ -794,23 +787,10 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
   container.innerHTML = '';
 
   // Use ResizeObserver to handle responsiveness
-  // We attach it to the container, but we need to make sure we don't add multiple observers
   if (!container._resizeObserver) {
     container._resizeObserver = new ResizeObserver(entries => {
-      // Debounce slightly or just re-render
-      // For simplicity, we just re-call renderBarChart
-      // Note: This might cause a loop if we are not careful, but since we clear innerHTML, it should be fine.
-      // However, to avoid infinite loops if the chart itself causes resize, we check dimensions.
-      for (let entry of entries) {
-        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-          // We need to pass the original data back. 
-          // Since we don't have easy access to it in this closure without re-fetching or storing,
-          // a better approach for simple responsiveness is to use viewBox on the SVG.
-        }
-      }
+      // Placeholder for resize logic if needed
     });
-    // Actually, let's use the viewBox approach for simpler responsiveness without re-rendering logic complexity here.
-    // container._resizeObserver.observe(container);
   }
 
   const width = container.clientWidth;
@@ -819,27 +799,30 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
 
   const svg = d3.select(container)
     .append('svg')
-    .attr('width', '100%') // Responsive width
-    .attr('height', '100%') // Responsive height
-    .attr('viewBox', `0 0 ${width} ${height}`) // Scale content
-    .attr('preserveAspectRatio', 'xMidYMid meet'); // Preserve aspect, don't stretch text
+    .attr('width', '100%')
+    .attr('height', '100%')
+    .attr('viewBox', `0 0 ${width} ${height}`)
+    .attr('preserveAspectRatio', 'xMidYMid meet');
+
+  const hasCurrent = currentData && currentData.length > 0;
+  const hasRef = referenceData && referenceData.length > 0;
+
+  // Determine which dataset drives the X-axis
+  // If we have current data, use it (and overlay reference on top)
+  // If we only have reference data (loading state), use reference
+  const primaryData = hasCurrent ? currentData : (hasRef ? referenceData : []);
+
+  if (primaryData.length === 0) return;
 
   // X scale
-  // Combine dates from both datasets to ensure complete axis
-  const allDates = new Set([
-    ...currentData.map(d => d.date.getTime()),
-    ...(referenceData || []).map(d => d.date.getTime())
-  ]);
-  const sortedDates = Array.from(allDates).sort((a, b) => a - b).map(t => new Date(t));
-
   const x = d3.scaleBand()
-    .domain(sortedDates)
+    .domain(primaryData.map(d => d.date))
     .range([margin.left, width - margin.right])
     .padding(0.2);
 
   // Y scale
   const maxVal = Math.max(
-    d3.max(currentData, d => d.value) || 0,
+    d3.max(currentData || [], d => d.value) || 0,
     d3.max(referenceData || [], d => d.value) || 0
   );
 
@@ -848,60 +831,66 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .range([height - margin.bottom, margin.top]);
 
   // Draw Reference Bars (Gray) - Full Width
-  if (referenceData && referenceData.length > 0) {
+  if (hasRef) {
+    // If we have current data, we map reference data to current dates by index
+    // If we don't have current data, we just draw reference data as is
+    const refSource = hasCurrent ? currentData : referenceData;
+
     svg.selectAll('.bar-ref')
-      .data(currentData)
+      .data(refSource)
       .enter()
       .append('rect')
       .attr('class', 'bar-ref')
       .attr('x', d => x(d.date))
-      .attr('width', x.bandwidth()) // Full bandwidth
+      .attr('width', x.bandwidth())
       .attr('y', (d, i) => {
-        const refVal = referenceData[i]?.value || 0;
-        return y(refVal);
+        // If overlaying, get value from referenceData by index
+        // If standalone, get value from d (which is referenceData item)
+        const val = hasCurrent ? (referenceData[i]?.value || 0) : d.value;
+        return y(val);
       })
       .attr('height', (d, i) => {
-        const refVal = referenceData[i]?.value || 0;
-        return y(0) - y(refVal);
+        const val = hasCurrent ? (referenceData[i]?.value || 0) : d.value;
+        return y(0) - y(val);
       })
-      .attr('fill', '#e2e8f0'); // Lighter gray (Slate-200)
+      .attr('fill', '#e2e8f0');
   }
 
   // Draw Current Bars (Conditional Color) - Half Width & Centered
-  svg.selectAll('.bar-current')
-    .data(currentData)
-    .enter()
-    .append('rect')
-    .attr('class', 'bar-current')
-    .attr('x', d => x(d.date) + x.bandwidth() * 0.25) // Center: 25% offset
-    .attr('width', x.bandwidth() * 0.5) // 50% width
-    .attr('y', y(0)) // Start from the zero line (axis)
-    .attr('height', 0) // Start with 0 height
-    .attr('fill', (d, i) => {
-      const refVal = referenceData?.[i]?.value || 0;
-      const isGrowth = d.value > refVal;
-      // Normal: Growth = Blue (Good), Decline = Red (Bad)
-      // Unfavorable: Growth = Red (Bad), Decline = Blue (Good)
-      const isGood = isUnfavorable ? !isGrowth : isGrowth;
-      return isGood ? '#4f46e5' : '#ef4444';
-    })
-    .transition() // Simplified entrance animation
-    .duration(400) // Shorter duration for better FPS
-    .ease(d3.easeQuadOut) // Smooth ease
-    .attr('y', d => y(d.value))
-    .attr('height', d => y(0) - y(d.value));
+  if (hasCurrent) {
+    svg.selectAll('.bar-current')
+      .data(currentData)
+      .enter()
+      .append('rect')
+      .attr('class', 'bar-current')
+      .attr('x', d => x(d.date) + x.bandwidth() * 0.25)
+      .attr('width', x.bandwidth() * 0.5)
+      .attr('y', y(0))
+      .attr('height', 0)
+      .attr('fill', (d, i) => {
+        const refVal = referenceData?.[i]?.value || 0;
+        const isGrowth = d.value > refVal;
+        const isGood = isUnfavorable ? !isGrowth : isGrowth;
+        return isGood ? '#4f46e5' : '#ef4444';
+      })
+      .transition()
+      .duration(400)
+      .ease(d3.easeQuadOut)
+      .attr('y', d => y(d.value))
+      .attr('height', d => y(0) - y(d.value));
+  }
 
   // Axis Labels (Start and End Date)
-  if (sortedDates.length > 0) {
-    const startDate = sortedDates[0];
-    const endDate = sortedDates[sortedDates.length - 1];
+  if (primaryData.length > 0) {
+    const startDate = primaryData[0].date;
+    const endDate = primaryData[primaryData.length - 1].date;
     const formatDate = d3.timeFormat('%b %d');
 
     svg.append('text')
       .attr('x', 0)
       .attr('y', height - 5)
       .attr('font-size', '10px')
-      .attr('fill', '#9ca3af') // Gray-400
+      .attr('fill', '#9ca3af')
       .text(formatDate(startDate));
 
     svg.append('text')
@@ -937,11 +926,10 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
   if (!container) return;
 
   container.innerHTML = '';
-  container.style.overflow = 'hidden'; // Fix overflow issues
+  container.style.overflow = 'hidden';
 
   const width = container.clientWidth;
   const height = container.clientHeight || 150;
-  // Increase margins to prevent cutoff (top increased from 10 to 15)
   const margin = { top: 15, right: 10, bottom: 20, left: 10 };
 
   const svg = d3.select(container)
@@ -951,24 +939,25 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .attr('viewBox', `0 0 ${width} ${height}`)
     .attr('preserveAspectRatio', 'xMidYMid meet');
 
-  // X scale (time)
-  // Combine dates to find full range
-  const allDates = [
-    ...currentData.map(d => d.date),
-    ...(referenceData || []).map(d => d.date)
-  ];
+  const hasCurrent = currentData && currentData.length > 0;
+  const hasRef = referenceData && referenceData.length > 0;
 
+  // Determine which dataset drives the X-axis
+  const primaryData = hasCurrent ? currentData : (hasRef ? referenceData : []);
+
+  if (primaryData.length === 0) return;
+
+  // X scale (time)
   const x = d3.scaleTime()
-    .domain(d3.extent(allDates))
+    .domain(d3.extent(primaryData, d => d.date))
     .range([margin.left, width - margin.right]);
 
-  // Y scale - smart domain calculation to fit all values (positive and negative)
+  // Y scale - smart domain calculation to fit all values
   const allValues = [
-    ...currentData.map(d => d.value),
+    ...(currentData || []).map(d => d.value),
     ...(referenceData || []).map(d => d.value)
   ];
 
-  // If no data, default to [0, 100]
   let minData = 0;
   let maxData = 100;
 
@@ -977,9 +966,7 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     maxData = d3.max(allValues);
   }
 
-  // Add padding (15% of the range)
   const range = maxData - minData;
-  // If range is 0 (flat line), add some default padding based on the value magnitude
   const padding = range > 0 ? range * 0.15 : (Math.abs(maxData) * 0.15 || 10);
 
   const yMin = minData - padding;
@@ -995,61 +982,70 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     .y(d => y(d.value))
     .curve(d3.curveMonotoneX);
 
-  // Draw zero line (dashed) if zero is within the domain
+  // Draw zero line (dashed)
   if (yMin <= 0 && yMax >= 0) {
     svg.append('line')
       .attr('x1', margin.left)
       .attr('x2', width - margin.right)
       .attr('y1', y(0))
       .attr('y2', y(0))
-      .attr('stroke', '#9ca3af') // Gray-400
+      .attr('stroke', '#9ca3af')
       .attr('stroke-width', 1)
       .attr('stroke-dasharray', '4,4')
       .attr('opacity', 0.5);
   }
 
   // Draw reference line (Solid Gray)
-  if (referenceData && referenceData.length > 0) {
-    const referenceLineData = currentData.map((d, i) => ({
-      date: d.date,
-      value: referenceData[i]?.value || 0
-    }));
+  if (hasRef) {
+    let referenceLineData;
+
+    if (hasCurrent) {
+      // Map reference values to current dates (overlay)
+      referenceLineData = currentData.map((d, i) => ({
+        date: d.date,
+        value: referenceData[i]?.value || 0
+      }));
+    } else {
+      // Use reference data directly
+      referenceLineData = referenceData;
+    }
 
     svg.append('path')
       .datum(referenceLineData)
       .attr('fill', 'none')
-      .attr('stroke', '#cbd5e1') // Slate-300
+      .attr('stroke', '#cbd5e1')
       .attr('stroke-width', 1.5)
-      // Removed stroke-dasharray for solid line
       .attr('d', line);
   }
 
   // Draw current period line
-  const currentPath = svg.append('path')
-    .datum(currentData)
-    .attr('fill', 'none')
-    .attr('stroke', isUnfavorable ? '#ef4444' : '#4f46e5') // Red if unfavorable, else Indigo
-    .attr('stroke-width', 2.5) // Slightly thicker for emphasis
-    .attr('d', line);
+  if (hasCurrent) {
+    const currentPath = svg.append('path')
+      .datum(currentData)
+      .attr('fill', 'none')
+      .attr('stroke', isUnfavorable ? '#ef4444' : '#4f46e5')
+      .attr('stroke-width', 2.5)
+      .attr('d', line);
 
-  // Animate line drawing
-  const totalLength = currentPath.node().getTotalLength();
-  currentPath
-    .attr('stroke-dasharray', totalLength + ' ' + totalLength)
-    .attr('stroke-dashoffset', totalLength)
-    .transition()
-    .duration(800)
-    .ease(d3.easeQuadOut)
-    .attr('stroke-dashoffset', 0);
+    // Animate line drawing
+    const totalLength = currentPath.node().getTotalLength();
+    currentPath
+      .attr('stroke-dasharray', totalLength + ' ' + totalLength)
+      .attr('stroke-dashoffset', totalLength)
+      .transition()
+      .duration(800)
+      .ease(d3.easeQuadOut)
+      .attr('stroke-dashoffset', 0);
 
-  // Hover Dot (initially hidden)
-  const hoverDot = svg.append('circle')
-    .attr('r', 4)
-    .attr('fill', isUnfavorable ? '#ef4444' : '#4f46e5')
-    .attr('stroke', '#fff')
-    .attr('stroke-width', 2)
-    .style('opacity', 0)
-    .style('pointer-events', 'none');
+    // Hover Dot (initially hidden)
+    const hoverDot = svg.append('circle')
+      .attr('r', 4)
+      .attr('fill', isUnfavorable ? '#ef4444' : '#4f46e5')
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 2)
+      .style('opacity', 0)
+      .style('pointer-events', 'none');
+  }
 
   // Axis labels
   const domain = x.domain();
