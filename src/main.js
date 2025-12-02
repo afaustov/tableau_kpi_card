@@ -65,16 +65,6 @@ function formatNumber(val, isPercentage) {
   return val.toFixed(1);
 }
 
-function showDebug(message) {
-  const debugDiv = document.getElementById('debug-info');
-  if (debugDiv) {
-    debugDiv.style.display = 'block';
-    debugDiv.style.zIndex = '99999';
-    debugDiv.style.background = 'rgba(255,255,255,0.8)';
-    debugDiv.innerHTML += `<div>${message}</div>`;
-  }
-}
-
 // -------------------- Initialization --------------------
 document.addEventListener('DOMContentLoaded', async () => {
   try {
