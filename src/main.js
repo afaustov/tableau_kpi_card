@@ -73,7 +73,6 @@ function showDebug(message) {
     debugDiv.style.background = 'rgba(255,255,255,0.8)';
     debugDiv.innerHTML += `<div>${message}</div>`;
   }
-  console.log(message);
 }
 
 // -------------------- Initialization --------------------
@@ -83,7 +82,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       throw new Error('Tableau Extensions API is not loaded.');
     }
     await window.tableau.extensions.initializeAsync();
-    console.log('Tableau Extension Initialized');
     const worksheet = window.tableau.extensions.worksheetContent.worksheet;
 
     // UI listeners
@@ -111,10 +109,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           // Check if there are real changes before refreshing
           const hasChanges = await checkForChanges(worksheet);
           if (hasChanges) {
-            console.log('🔄 Changes detected, refreshing KPIs...');
             await refreshKPIs(worksheet);
           } else {
-            console.log('⏭️ No changes detected, skipping refresh');
           }
         }
       }, 1000); // Longer debounce to avoid rapid refreshes
@@ -155,8 +151,6 @@ async function checkForChanges(worksheet) {
   try {
     const currentStateHash = await computeStateHash(worksheet);
 
-    console.log('🔍 Current State Hash:', currentStateHash);
-    console.log('🔍 Previous State Hash:', state.lastStateHash);
 
     // First load - always refresh
     if (state.lastStateHash === null) {
@@ -167,10 +161,8 @@ async function checkForChanges(worksheet) {
     // Compare with previous state
     const hasChanges = currentStateHash !== state.lastStateHash;
     if (hasChanges) {
-      console.log('✅ State changed!');
       state.lastStateHash = currentStateHash;
     } else {
-      console.log('⏭️ State unchanged');
     }
 
     return hasChanges;
@@ -256,7 +248,6 @@ async function refreshKPIs(worksheet) {
   state.isApplyingOwnFilters = true;
 
   document.getElementById('kpi-container').innerHTML = '<div class="loading">Calculating...</div>';
-  console.time('Total Refresh Time');
 
   // Unregister listener temporarily
   if (state.unregisterDataHandler) {
@@ -266,7 +257,6 @@ async function refreshKPIs(worksheet) {
 
   try {
     // 1. Get Encodings
-    console.time('Get Encodings');
     let metricFields = [];
     let dateFieldName = null;
 
@@ -274,7 +264,6 @@ async function refreshKPIs(worksheet) {
       const spec = await worksheet.getVisualSpecificationAsync();
       const encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
 
-      console.log('🔍 Raw Encodings:', JSON.stringify(encodings, null, 2));
       showDebug(`🔍 Encodings: ${encodings.length} found`);
 
       const getFieldNames = id =>
@@ -326,7 +315,6 @@ async function refreshKPIs(worksheet) {
         showDebug(`⚠️ Filters checked: ${filters.map(f => `${f.fieldName} (${f.columnType})`).join(', ')}`);
       }
     }
-    console.timeEnd('Get Encodings');
 
     if (!dateFieldName) {
       showDebug('⚠️ No Date field found');
@@ -345,7 +333,6 @@ async function refreshKPIs(worksheet) {
     if (metricFields.length === 0) {
       // Fallback: Try to guess metrics from summary data columns if visual spec failed
       const summary = await worksheet.getSummaryDataAsync({ maxRows: 1 });
-      console.log('🔍 Summary Columns:', summary.columns.map(c => c.fieldName));
       showDebug(`🔍 Summary Cols: ${summary.columns.length}`);
 
       const potentialMetrics = summary.columns
@@ -377,26 +364,20 @@ async function refreshKPIs(worksheet) {
     };
 
     // 3. Fetch Data (Sequential due to Tableau Filter API)
-    console.time('Fetch Data');
     const results = {};
 
     const fetchDataForRange = async (rangeLabel, range) => {
       try {
-        console.time(`Filter ${rangeLabel}`);
         await worksheet.applyRangeFilterAsync(dateFieldName, {
           min: range.start,
           max: range.end
         });
-        console.timeEnd(`Filter ${rangeLabel}`);
 
-        console.time(`GetData ${rangeLabel}`);
         const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
-        console.timeEnd(`GetData ${rangeLabel}`);
 
         const data = summary.data;
         const columns = summary.columns;
 
-        console.time(`Process ${rangeLabel}`);
         const values = {};
         metricFields.forEach(mName => { values[mName] = { val: 0, fmt: '' }; });
 
@@ -422,7 +403,6 @@ async function refreshKPIs(worksheet) {
             }
           }
         }
-        console.timeEnd(`Process ${rangeLabel}`);
 
         results[rangeLabel] = values;
       } catch (e) {
@@ -434,7 +414,6 @@ async function refreshKPIs(worksheet) {
     await fetchDataForRange('current', periods.current);
     await fetchDataForRange('prevMonth', periods.prevMonth);
     await fetchDataForRange('prevYear', periods.prevYear);
-    console.timeEnd('Fetch Data');
 
     // 4. Clear Filter
     await worksheet.clearFilterAsync(dateFieldName);
@@ -496,7 +475,6 @@ async function refreshKPIs(worksheet) {
         state.handleDataChange
       );
     }
-    console.timeEnd('Total Refresh Time');
   }
 }
 
