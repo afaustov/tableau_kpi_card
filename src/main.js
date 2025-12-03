@@ -770,7 +770,7 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
 
         // Progressive loading: Fetch and render REFERENCE period first (gray bars)
-        chartDataReference = await fetchBarChartData(
+        chartDataReference = await fetchChartDataByGranularity(
           worksheet,
           dateFieldName,
           card.name,
@@ -786,7 +786,7 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         }
 
         // Fetch chart data for CURRENT period
-        chartDataCurrent = await fetchBarChartData(
+        chartDataCurrent = await fetchChartDataByGranularity(
           worksheet,
           dateFieldName,
           card.name,
@@ -813,6 +813,165 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
     }
   }
 
+}
+
+// Fetch chart data with granularity support
+async function fetchChartDataByGranularity(worksheet, dateFieldName, metricField, range, tooltipFields = []) {
+  const granularity = state.granularity || 'days';
+
+  if (granularity === 'days') {
+    return await fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields);
+  } else {
+    return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity);
+  }
+}
+
+// Fetch aggregated data for weeks/months/quarters/years
+async function fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], granularity) {
+  try {
+    const dataPoints = [];
+    const periods = generatePeriods(range.start, range.end, granularity);
+
+    for (const period of periods) {
+      await worksheet.applyRangeFilterAsync(dateFieldName, {
+        min: period.start,
+        max: period.end
+      });
+
+      const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+      const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+
+      // Find indices for tooltip fields
+      const tooltipIndices = tooltipFields.map(tf => ({
+        name: tf,
+        index: summary.columns.findIndex(c => c.fieldName === tf)
+      }));
+
+      let periodValue = 0;
+      const periodTooltipValues = {};
+      tooltipFields.forEach(tf => periodTooltipValues[tf] = { val: null, fmt: '' });
+
+      if (metricIndex !== -1) {
+        summary.data.forEach(row => {
+          const val = row[metricIndex].nativeValue;
+          if (typeof val === 'number') periodValue += val;
+
+          // Aggregate tooltip fields
+          tooltipIndices.forEach(ti => {
+            if (ti.index !== -1) {
+              const tVal = row[ti.index].nativeValue;
+
+              if (typeof tVal === 'number') {
+                if (periodTooltipValues[ti.name].val === null) periodTooltipValues[ti.name].val = 0;
+                periodTooltipValues[ti.name].val += tVal;
+              } else {
+                periodTooltipValues[ti.name].val = tVal;
+              }
+
+              if (!periodTooltipValues[ti.name].fmt && row[ti.index].formattedValue) {
+                periodTooltipValues[ti.name].fmt = row[ti.index].formattedValue;
+              }
+            }
+          });
+        });
+      }
+
+      dataPoints.push({
+        date: new Date(period.start),
+        value: periodValue,
+        tooltipValues: periodTooltipValues
+      });
+    }
+
+    await worksheet.clearFilterAsync(dateFieldName);
+    return dataPoints;
+
+  } catch (e) {
+    return [];
+  }
+}
+
+// Generate periods based on granularity
+function generatePeriods(startDate, endDate, granularity) {
+  const periods = [];
+  let current = new Date(startDate);
+
+  while (current <= endDate) {
+    let periodStart = new Date(current);
+    let periodEnd;
+
+    if (granularity === 'weeks') {
+      // Week period
+      const weekStart = state.weekStart === 'sunday' ? 0 : 1;
+      const currentDay = periodStart.getUTCDay();
+
+      // Adjust to week start
+      const daysToWeekStart = (currentDay - weekStart + 7) % 7;
+      periodStart.setDate(periodStart.getDate() - daysToWeekStart);
+      periodStart.setUTCHours(0, 0, 0, 0);
+
+      periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + 6);
+      periodEnd.setUTCHours(23, 59, 59, 999);
+
+      current = new Date(periodEnd);
+      current.setDate(current.getDate() + 1);
+
+    } else if (granularity === 'months') {
+      // Month period
+      periodStart.setDate(1);
+      periodStart.setUTCHours(0, 0, 0, 0);
+
+      periodEnd = new Date(periodStart);
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+      periodEnd.setDate(0); // Last day of month
+      periodEnd.setUTCHours(23, 59, 59, 999);
+
+      current = new Date(periodStart);
+      current.setMonth(current.getMonth() + 1);
+
+    } else if (granularity === 'quarters') {
+      // Quarter period
+      const quarterStart = Math.floor(periodStart.getMonth() / 3) * 3;
+      periodStart.setMonth(quarterStart);
+      periodStart.setDate(1);
+      periodStart.setUTCHours(0, 0, 0, 0);
+
+      periodEnd = new Date(periodStart);
+      periodEnd.setMonth(periodEnd.getMonth() + 3);
+      periodEnd.setDate(0); // Last day of quarter
+      periodEnd.setUTCHours(23, 59, 59, 999);
+
+      current = new Date(periodStart);
+      current.setMonth(current.getMonth() + 3);
+
+    } else if (granularity === 'years') {
+      // Year period
+      periodStart.setMonth(0);
+      periodStart.setDate(1);
+      periodStart.setUTCHours(0, 0, 0, 0);
+
+      periodEnd = new Date(periodStart);
+      periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+      periodEnd.setDate(0); // Last day of year
+      periodEnd.setUTCHours(23, 59, 59, 999);
+
+      current = new Date(periodStart);
+      current.setFullYear(current.getFullYear() + 1);
+    }
+
+    // Don't exceed end date
+    if (periodEnd > endDate) {
+      periodEnd = new Date(endDate);
+    }
+
+    periods.push({ start: periodStart, end: periodEnd });
+
+    // Break if we've passed the end date
+    if (periodStart >= endDate) break;
+  }
+
+  return periods;
 }
 
 async function fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields = []) {
