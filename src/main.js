@@ -21,12 +21,13 @@ const granularityConfig = {
   mtd: ['days', 'weeks'],
   qtd: ['weeks', 'months'],
   ytd: ['months', 'quarters'],
-  rolling: ['days', 'months', 'quarters', 'years']
+  rolling: ['days', 'weeks', 'months', 'quarters', 'years']
 };
 
 // Default rolling counts for each granularity
 const rollingDefaults = {
   days: 30,
+  weeks: 12,
   months: 12,
   quarters: 4,
   years: 4
@@ -99,6 +100,15 @@ function getRange(period, anchorDate) {
 
     if (granularity === 'days') {
       start.setDate(start.getDate() - (count - 1));
+    } else if (granularity === 'weeks') {
+      // Go back 'count' weeks
+      start.setDate(start.getDate() - ((count - 1) * 7));
+
+      // Adjust to week start
+      const weekStart = state.weekStart === 'sunday' ? 0 : 1;
+      const currentDay = start.getUTCDay();
+      const daysToWeekStart = (currentDay - weekStart + 7) % 7;
+      start.setDate(start.getDate() - daysToWeekStart);
     } else if (granularity === 'months') {
       start.setMonth(start.getMonth() - (count - 1));
       start.setDate(1); // Start from beginning of month
@@ -643,7 +653,13 @@ function renderKPIs(metrics, showSkeleton = false) {
         </div>
       </div>
 
-      <div class="metric-subtitle">${metric.name} ${state.selectedPeriod.toUpperCase()}</div>
+      <div class="metric-subtitle">
+        ${metric.name} 
+        ${state.selectedPeriod === 'rolling'
+        ? `Rolling ${state.rollingCount} ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`
+        : `${state.selectedPeriod.toUpperCase()} - ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`
+      }
+      </div>
       
       <div id="${chartId}" class="bar-chart-container" style="width: 100%; flex: 1; min-height: 100px; margin-top: 12px; display: flex; align-items: flex-end;"></div>
     `;
