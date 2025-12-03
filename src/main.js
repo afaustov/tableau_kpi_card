@@ -33,6 +33,18 @@ const rollingDefaults = {
   years: 4
 };
 
+// Update the custom selector display text
+function updateSelectorDisplay() {
+  const select = document.getElementById('period-granularity-select');
+  const display = document.getElementById('period-granularity-display');
+  if (select && display) {
+    const selectedOption = select.options[select.selectedIndex];
+    const groupLabel = selectedOption.parentElement.label;
+    const optionLabel = selectedOption.text;
+    display.textContent = `${groupLabel} - ${optionLabel}`;
+  }
+}
+
 // Initialize controls
 function initializeControls() {
   state.selectedPeriod = 'rolling';
@@ -41,6 +53,7 @@ function initializeControls() {
   state.rollingCount = 30;
 
   updateControlsVisibility();
+  updateSelectorDisplay();
 }
 
 // Update visibility of week-start and rolling controls
@@ -172,6 +185,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.selectedPeriod = period;
       state.granularity = granularity;
       updateControlsVisibility();
+      updateSelectorDisplay();
       state.lastStateHash = null;
       refreshKPIs(worksheet);
     });
