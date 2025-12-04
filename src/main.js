@@ -522,7 +522,8 @@ async function refreshKPIs(worksheet) {
 
         // If we have detail fields, group by their values
         if (detailFields.length > 0) {
-          const groupedValues = {}; // { detailKey: { metricName: { val, fmt } } }
+          // Use Map to preserve insertion order (respects Tableau sorting)
+          const groupedValues = new Map();
 
           for (let i = 0; i < data.length; i++) {
             const row = data[i];
@@ -538,30 +539,43 @@ async function refreshKPIs(worksheet) {
             }
             const detailKey = detailParts.join(' | ');
 
-            // Initialize group if needed
-            if (!groupedValues[detailKey]) {
-              groupedValues[detailKey] = {};
+            // Initialize group if needed (Map preserves insertion order)
+            if (!groupedValues.has(detailKey)) {
+              const metrics = {};
               metricFields.forEach(mName => {
-                groupedValues[detailKey][mName] = { val: 0, fmt: '' };
+                metrics[mName] = { val: 0, fmt: '' };
               });
+              groupedValues.set(detailKey, metrics);
             }
 
             // Accumulate metric values for this group
+            const groupMetrics = groupedValues.get(detailKey);
             for (const mName of metricFields) {
               const idx = colIndices[mName];
               if (idx !== undefined) {
                 const val = row[idx].nativeValue;
                 if (typeof val === 'number') {
-                  groupedValues[detailKey][mName].val += val;
+                  groupMetrics[mName].val += val;
                 }
-                if (!groupedValues[detailKey][mName].fmt && row[idx].formattedValue) {
-                  groupedValues[detailKey][mName].fmt = row[idx].formattedValue;
+                if (!groupMetrics[mName].fmt && row[idx].formattedValue) {
+                  groupMetrics[mName].fmt = row[idx].formattedValue;
                 }
               }
             }
           }
 
-          results[rangeLabel] = groupedValues;
+          // Convert Map to object but preserve order in a separate array
+          const resultObj = {};
+          groupedValues.forEach((value, key) => {
+            resultObj[key] = value;
+          });
+
+          // Store ordered keys for this range
+          if (rangeLabel === 'current') {
+            state.orderedDetailKeys = Array.from(groupedValues.keys());
+          }
+
+          results[rangeLabel] = resultObj;
         } else {
           // No detail fields - aggregate all values (original behavior)
           const values = {};
@@ -602,7 +616,10 @@ async function refreshKPIs(worksheet) {
     const cards = [];
 
     // Get all unique detail keys from the results
-    const detailKeys = Object.keys(results.current || {});
+    // Use ordered keys if available (from current range fetching), otherwise fallback to keys from results
+    const detailKeys = state.orderedDetailKeys && state.orderedDetailKeys.length > 0
+      ? state.orderedDetailKeys
+      : Object.keys(results.current || {});
 
     function createCardData(mName, chartType, detailKey = '') {
       const curObj = results.current?.[detailKey]?.[mName];
@@ -735,6 +752,15 @@ function renderKPIs(metrics, showSkeleton = false) {
       return isPct ? `${sign}${val.toFixed(1)}%` : `${sign}${formatNumber(Math.abs(val), false)}`;
     };
 
+    // Format subtitle: "Metric Name Rolling 30 Days: Detail Value"
+    const periodText = state.selectedPeriod === 'rolling'
+      ? `Rolling ${state.rollingCount} ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`
+      : `${state.selectedPeriod.toUpperCase()} - ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`;
+
+    const subtitleText = metric.detailKey
+      ? `${metric.baseName} ${periodText}: ${metric.detailKey}`
+      : `${metric.baseName} ${periodText}`;
+
     item.innerHTML = `
       <div class="big-value">${formatNumber(metric.current, metric.isPercentage)}</div>
       
@@ -763,11 +789,7 @@ function renderKPIs(metrics, showSkeleton = false) {
       </div>
 
       <div class="metric-subtitle">
-        ${metric.name} 
-        ${state.selectedPeriod === 'rolling'
-        ? `Rolling ${state.rollingCount} ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`
-        : `${state.selectedPeriod.toUpperCase()} - ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`
-      }
+        ${subtitleText}
       </div>
       
       <div id="${chartId}" class="bar-chart-container" style="width: 100%; flex: 1; min-height: 0; margin-top: 12px; display: flex; align-items: flex-end;"></div>
@@ -1445,23 +1467,43 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
   }
 
   // Простая интерактивность: hover по отдельным барам
-  if (hasCurrent) {
-    attachBarHoverInteraction(container, currentData, referenceData, metricName, isPercentage, isUnfavorable, tooltipFields);
-  }
+  attachBarHoverInteraction(container, primaryData, referenceData, metricName, isPercentage, isUnfavorable, tooltipFields, hasCurrent);
 }
 
 // Для баров: наведение на колонку показывает tooltip и подсветку.
-function attachBarHoverInteraction(containerEl, currentData, referenceData, metricName, isPct, isUnfavorable, tooltipFields = []) {
-  const bars = containerEl.querySelectorAll('.bar-current');
-  bars.forEach((barEl, i) => {
-    const d = currentData[i];
-    if (!d) return;
+function attachBarHoverInteraction(containerEl, data, referenceData, metricName, isPct, isUnfavorable, tooltipFields = [], hasCurrent = true) {
+  // Select bars based on what we have. If we have current, we interact with current bars (which are on top or centered).
+  // If we only have ref, we interact with ref bars.
+  // Actually, let's try to interact with whatever is available at that index.
+
+  // Strategy: Iterate through data (which is primaryData) and find corresponding DOM elements
+  data.forEach((d, i) => {
+    // Try to find current bar first, then ref bar
+    let barEl = containerEl.querySelector(`.bar-current:nth-of-type(${i + 1})`);
+    if (!barEl) {
+      barEl = containerEl.querySelector(`.bar-ref:nth-of-type(${i + 1})`);
+    }
+
+    if (!barEl) return;
+
     const refVal = referenceData ? (referenceData[i]?.value || 0) : 0;
+    // If hasCurrent is false, then d is from referenceData, so value is d.value. 
+    // And refVal is also d.value (since referenceData is primary). 
+    // Wait, if !hasCurrent, data IS referenceData. So d.value is the reference value.
+    // And we want to show it as reference? Or as current?
+    // Usually "Reference" implies comparison. If we only have reference data (loading state or no current data), 
+    // we show it as "Reference" value in tooltip, or just value?
+    // Let's assume:
+    // If hasCurrent: Current = d.value, Ref = refVal
+    // If !hasCurrent: Current = N/A (or 0), Ref = d.value
+
+    const currentVal = hasCurrent ? d.value : 0; // Or null?
+    const referenceVal = hasCurrent ? refVal : d.value;
 
     barEl.style.cursor = 'pointer';
 
     barEl.addEventListener('mouseenter', (e) => {
-      showTooltipForBar(e, d.date, d.value, refVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
+      showTooltipForBar(e, d.date, currentVal, referenceVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
       barEl.classList.add('active');
     });
 
@@ -1631,7 +1673,7 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
     height,
     margin,
     x,
-    currentData,
+    primaryData, // Use primaryData (current or ref) to ensure interaction works
     referenceData,
     metricName,
     isPercentage,
