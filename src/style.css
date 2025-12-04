@@ -430,3 +430,13 @@ body {
   stroke: #1e293b;
   stroke-width: 2px;
 }
+
+/* Numeric inputs (e.g. Rolling - Days value) */
+input[type="number"] {
+  min-width: 52px; /* enough to comfortably fit "30" and similar values */
+  padding: 4px 6px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  box-sizing: border-box;
+}
