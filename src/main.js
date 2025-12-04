@@ -1015,12 +1015,9 @@ function generatePeriods(startDate, endDate, granularity) {
   return periods;
 }
 
-// Fetch daily data in ONE request and group by day on the client.
-// Это сохраняет корректность для процентов: мы не суммируем разные дни,
-// а используем те агрегаты, которые уже вернул Tableau для каждой даты.
 async function fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields = []) {
   try {
-    // Один фильтр на весь диапазон
+    // Попытка оптимизированного пути: один запрос на весь диапазон
     await worksheet.applyRangeFilterAsync(dateFieldName, {
       min: range.start,
       max: range.end
@@ -1029,6 +1026,75 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
     const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
     const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
     const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+
+    // Если дата колонка недоступна в summary (например, только в фильтре) —
+    // откатываемся к старому надёжному, но более тяжёлому алгоритму по дням.
+    if (dateIndex === -1 || metricIndex === -1) {
+      await worksheet.clearFilterAsync(dateFieldName);
+
+      const dataPoints = [];
+      const startDate = new Date(range.start);
+      const endDate = new Date(range.end);
+
+      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        const dayStart = new Date(d);
+        dayStart.setUTCHours(0, 0, 0, 0);
+        const dayEnd = new Date(d);
+        dayEnd.setUTCHours(23, 59, 59, 999);
+
+        await worksheet.applyRangeFilterAsync(dateFieldName, {
+          min: dayStart,
+          max: dayEnd
+        });
+
+        const daySummary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+        const metricIdx = daySummary.columns.findIndex(c => c.fieldName === metricField);
+
+        const tooltipIndicesFallback = tooltipFields.map(tf => ({
+          name: tf,
+          index: daySummary.columns.findIndex(c => c.fieldName === tf)
+        }));
+
+        let dailyValue = 0;
+        const dailyTooltipValues = {};
+        tooltipFields.forEach(tf => dailyTooltipValues[tf] = { val: null, fmt: '' });
+
+        if (metricIdx !== -1) {
+          daySummary.data.forEach(row => {
+            const val = row[metricIdx].nativeValue;
+            if (typeof val === 'number') dailyValue += val;
+
+            tooltipIndicesFallback.forEach(ti => {
+              if (ti.index === -1) return;
+              const cell = row[ti.index];
+              const tVal = cell.nativeValue;
+              const tFmt = cell.formattedValue;
+              const tv = dailyTooltipValues[ti.name];
+
+              if (typeof tVal === 'number') {
+                if (tv.val === null) tv.val = 0;
+                tv.val += tVal;
+              } else if (tVal !== undefined && tVal !== null) {
+                tv.val = tVal;
+              }
+
+              if (!tv.fmt && tFmt) {
+                tv.fmt = tFmt;
+              }
+            });
+          });
+        }
+
+        dataPoints.push({
+          date: new Date(dayStart),
+          value: dailyValue,
+          tooltipValues: dailyTooltipValues
+        });
+      }
+
+      await worksheet.clearFilterAsync(dateFieldName);
+      return dataPoints;
+    }
 
     // Индексы для доп. полей тултипа
     const tooltipIndices = tooltipFields.map(tf => ({
@@ -1039,62 +1105,54 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
     // Группируем по дате (ключ YYYY-MM-DD)
     const grouped = new Map();
 
-    if (metricIndex !== -1 && dateIndex !== -1) {
-      summary.data.forEach(row => {
-        const rawDate = row[dateIndex].nativeValue;
-        if (!rawDate) return;
-        const d = new Date(rawDate);
-        // Нормализуем к дню
-        d.setUTCHours(0, 0, 0, 0);
-        const key = d.toISOString().slice(0, 10);
+    summary.data.forEach(row => {
+      const rawDate = row[dateIndex].nativeValue;
+      if (!rawDate) return;
+      const d = new Date(rawDate);
+      d.setUTCHours(0, 0, 0, 0);
+      const key = d.toISOString().slice(0, 10);
 
-        if (!grouped.has(key)) {
-          const tooltipInit = {};
-          tooltipFields.forEach(tf => {
-            tooltipInit[tf] = { val: null, fmt: '' };
-          });
-          grouped.set(key, {
-            date: d,
-            value: 0,
-            tooltipValues: tooltipInit
-          });
-        }
-
-        const bucket = grouped.get(key);
-        const val = row[metricIndex].nativeValue;
-
-        // Если метрика – число, аккумулируем сумму (как и раньше).
-        if (typeof val === 'number') {
-          bucket.value += val;
-        } else if (bucket.value === 0 && typeof val !== 'undefined') {
-          // Если это не число (например, %, строка) — берём как есть для этого дня.
-          // Мы не суммируем разные дни, только разные строки одного дня.
-          bucket.value = val;
-        }
-
-        // Агрегация tooltip-полей
-        tooltipIndices.forEach(ti => {
-          if (ti.index === -1) return;
-          const cell = row[ti.index];
-          const tVal = cell.nativeValue;
-          const tFmt = cell.formattedValue;
-          const tv = bucket.tooltipValues[ti.name];
-
-          if (typeof tVal === 'number') {
-            if (tv.val === null) tv.val = 0;
-            tv.val += tVal;
-          } else if (tVal !== undefined && tVal !== null) {
-            tv.val = tVal;
-          }
-
-          if (!tv.fmt && tFmt) {
-            tv.fmt = tFmt;
-          }
+      if (!grouped.has(key)) {
+        const tooltipInit = {};
+        tooltipFields.forEach(tf => {
+          tooltipInit[tf] = { val: null, fmt: '' };
         });
-      });
-    }
+        grouped.set(key, {
+          date: d,
+          value: 0,
+          tooltipValues: tooltipInit
+        });
+      }
 
-    // Сортируем по дате
+      const bucket = grouped.get(key);
+      const val = row[metricIndex].nativeValue;
+
+      if (typeof val === 'number') {
+        bucket.value += val;
+      } else if (bucket.value === 0 && typeof val !== 'undefined') {
+        bucket.value = val;
+      }
+
+      tooltipIndices.forEach(ti => {
+        if (ti.index === -1) return;
+        const cell = row[ti.index];
+        const tVal = cell.nativeValue;
+        const tFmt = cell.formattedValue;
+        const tv = bucket.tooltipValues[ti.name];
+
+        if (typeof tVal === 'number') {
+          if (tv.val === null) tv.val = 0;
+          tv.val += tVal;
+        } else if (tVal !== undefined && tVal !== null) {
+          tv.val = tVal;
+        }
+
+        if (!tv.fmt && tFmt) {
+          tv.fmt = tFmt;
+        }
+      });
+    });
+
     const dataPoints = Array.from(grouped.values()).sort((a, b) => a.date - b.date);
 
     await worksheet.clearFilterAsync(dateFieldName);
