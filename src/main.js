@@ -327,6 +327,13 @@ async function computeStateHash(worksheet) {
         .filter(Boolean)
         .sort();
 
+      // Get detail fields (standard Tableau Detail shelf)
+      const detailFields = encodings
+        .filter(e => e.id === 'detail')
+        .map(e => e.field?.name || e.field || e.fieldName)
+        .filter(Boolean)
+        .sort();
+
       const dateFields = encodings
         .filter(e => e.id === 'date')
         .map(e => e.field?.name || e.field || e.fieldName)
@@ -336,6 +343,7 @@ async function computeStateHash(worksheet) {
       hashParts.push(`metrics:${orderedEncodings}`);
       hashParts.push(`unfavorable:${unfavorableFields.join(',')}`);
       hashParts.push(`tooltip:${tooltipFields.join(',')}`);
+      hashParts.push(`detail:${detailFields.join(',')}`);
       hashParts.push(`dates:${dateFields.join(',')}`);
     }
 
@@ -402,6 +410,7 @@ async function refreshKPIs(worksheet) {
       const linesFields = getFieldNames('lines');
       const unfavorableFields = getFieldNames('unfavorable');
       const tooltipFields = getFieldNames('tooltip');
+      const detailFields = getFieldNames('detail'); // Standard Tableau Detail shelf
 
       // Create ordered metrics list
       const orderedMetrics = [];
@@ -428,7 +437,7 @@ async function refreshKPIs(worksheet) {
       }
 
       // Store encoding info in state for later use
-      state.encodings = { barsFields, linesFields, unfavorableFields, tooltipFields, orderedMetrics };
+      state.encodings = { barsFields, linesFields, unfavorableFields, tooltipFields, detailFields, orderedMetrics };
     }
 
     if (!dateFieldName) {
@@ -496,33 +505,87 @@ async function refreshKPIs(worksheet) {
         const data = summary.data;
         const columns = summary.columns;
 
-        const values = {};
-        metricFields.forEach(mName => { values[mName] = { val: 0, fmt: '' }; });
+        // Get detail field indices
+        const detailFields = state.encodings.detailFields || [];
+        const detailColIndices = {};
+        detailFields.forEach(dName => {
+          const col = columns.find(c => c.fieldName === dName);
+          if (col) detailColIndices[dName] = col.index;
+        });
 
-        // Optimize loop: Pre-calculate column indices
+        // Optimize loop: Pre-calculate column indices for metrics
         const colIndices = {};
         metricFields.forEach(mName => {
           const col = columns.find(c => c.fieldName === mName);
           if (col) colIndices[mName] = col.index;
         });
 
-        for (let i = 0; i < data.length; i++) {
-          const row = data[i];
-          for (const mName of metricFields) {
-            const idx = colIndices[mName];
-            if (idx !== undefined) {
-              const val = row[idx].nativeValue;
-              if (typeof val === 'number') {
-                values[mName].val += val;
+        // If we have detail fields, group by their values
+        if (detailFields.length > 0) {
+          const groupedValues = {}; // { detailKey: { metricName: { val, fmt } } }
+
+          for (let i = 0; i < data.length; i++) {
+            const row = data[i];
+
+            // Build detail key from row values
+            const detailParts = [];
+            for (const dName of detailFields) {
+              const idx = detailColIndices[dName];
+              if (idx !== undefined) {
+                const val = row[idx].formattedValue || row[idx].nativeValue || '';
+                detailParts.push(String(val));
               }
-              if (!values[mName].fmt && row[idx].formattedValue) {
-                values[mName].fmt = row[idx].formattedValue;
+            }
+            const detailKey = detailParts.join(' | ');
+
+            // Initialize group if needed
+            if (!groupedValues[detailKey]) {
+              groupedValues[detailKey] = {};
+              metricFields.forEach(mName => {
+                groupedValues[detailKey][mName] = { val: 0, fmt: '' };
+              });
+            }
+
+            // Accumulate metric values for this group
+            for (const mName of metricFields) {
+              const idx = colIndices[mName];
+              if (idx !== undefined) {
+                const val = row[idx].nativeValue;
+                if (typeof val === 'number') {
+                  groupedValues[detailKey][mName].val += val;
+                }
+                if (!groupedValues[detailKey][mName].fmt && row[idx].formattedValue) {
+                  groupedValues[detailKey][mName].fmt = row[idx].formattedValue;
+                }
               }
             }
           }
-        }
 
-        results[rangeLabel] = values;
+          results[rangeLabel] = groupedValues;
+        } else {
+          // No detail fields - aggregate all values (original behavior)
+          const values = {};
+          metricFields.forEach(mName => { values[mName] = { val: 0, fmt: '' }; });
+
+          for (let i = 0; i < data.length; i++) {
+            const row = data[i];
+            for (const mName of metricFields) {
+              const idx = colIndices[mName];
+              if (idx !== undefined) {
+                const val = row[idx].nativeValue;
+                if (typeof val === 'number') {
+                  values[mName].val += val;
+                }
+                if (!values[mName].fmt && row[idx].formattedValue) {
+                  values[mName].fmt = row[idx].formattedValue;
+                }
+              }
+            }
+          }
+
+          // Store as single empty-key group for consistency
+          results[rangeLabel] = { '': values };
+        }
       } catch (e) {
         throw e;
       }
@@ -538,32 +601,41 @@ async function refreshKPIs(worksheet) {
     // 5. Prepare metrics data - create separate cards for bars and lines
     const cards = [];
 
-    function createCardData(mName, chartType) {
-      const curObj = results.current?.[mName];
-      const prevMObj = results.prevMonth?.[mName];
+    // Get all unique detail keys from the results
+    const detailKeys = Object.keys(results.current || {});
+
+    function createCardData(mName, chartType, detailKey = '') {
+      const curObj = results.current?.[detailKey]?.[mName];
+      const prevMObj = results.prevMonth?.[detailKey]?.[mName];
+      const prevYObj = results.prevYear?.[detailKey]?.[mName];
       const curVal = curObj?.val || 0;
       const refVal = prevMObj?.val || 0;
       const isUnfavorable = state.encodings.unfavorableFields.includes(mName);
 
-      // Collect tooltip values
+      // Collect tooltip values for this detail group
       const tooltipValues = {};
       if (state.encodings.tooltipFields) {
         state.encodings.tooltipFields.forEach(tf => {
           tooltipValues[tf] = {
-            current: results.current?.[tf]?.val || 0,
-            prevMonth: results.prevMonth?.[tf]?.val || 0,
-            prevYear: results.prevYear?.[tf]?.val || 0,
-            fmt: results.current?.[tf]?.fmt || ''
+            current: results.current?.[detailKey]?.[tf]?.val || 0,
+            prevMonth: results.prevMonth?.[detailKey]?.[tf]?.val || 0,
+            prevYear: results.prevYear?.[detailKey]?.[tf]?.val || 0,
+            fmt: results.current?.[detailKey]?.[tf]?.fmt || ''
           };
         });
       }
 
+      // Build display name: "Metric Name" or "Metric Name - Detail Value"
+      const displayName = detailKey ? `${mName} - ${detailKey}` : mName;
+
       return {
-        name: mName,
+        name: displayName,
+        baseName: mName, // Original metric name for chart caching
+        detailKey, // Store detail key for reference
         current: curVal,
         reference: refVal,
         prevMonth: prevMObj?.val || 0,
-        prevYear: results.prevYear?.[mName]?.val || 0,
+        prevYear: prevYObj?.val || 0,
         isPercentage: curObj?.fmt?.includes('%') ?? false,
         formattedValue: curObj?.fmt,
         dateFieldName,
@@ -574,15 +646,25 @@ async function refreshKPIs(worksheet) {
       };
     }
 
-    // Create cards preserving order
+    // Create cards preserving order - for each metric, create a card for each detail group
     if (state.encodings.orderedMetrics && state.encodings.orderedMetrics.length > 0) {
       state.encodings.orderedMetrics.forEach(metric => {
-        cards.push(createCardData(metric.name, metric.type));
+        detailKeys.forEach(detailKey => {
+          cards.push(createCardData(metric.name, metric.type, detailKey));
+        });
       });
     } else {
       // Fallback
-      state.encodings.barsFields.forEach(mName => cards.push(createCardData(mName, 'bar')));
-      state.encodings.linesFields.forEach(mName => cards.push(createCardData(mName, 'line')));
+      state.encodings.barsFields.forEach(mName => {
+        detailKeys.forEach(detailKey => {
+          cards.push(createCardData(mName, 'bar', detailKey));
+        });
+      });
+      state.encodings.linesFields.forEach(mName => {
+        detailKeys.forEach(detailKey => {
+          cards.push(createCardData(mName, 'line', detailKey));
+        });
+      });
     }
 
     // Render KPIs immediately with skeleton charts
@@ -635,7 +717,9 @@ function renderKPIs(metrics, showSkeleton = false) {
     const yoyDiff = metric.current - metric.prevYear;
     const yoyPct = metric.prevYear ? (yoyDiff / metric.prevYear) * 100 : 0;
 
-    const chartId = `chart-${metric.name.replace(/\s+/g, '-')}-${metric.chartType}`;
+    // Generate safe chartId - replace any non-alphanumeric chars with dashes
+    const safeChartName = metric.name.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-');
+    const chartId = `chart-${safeChartName}-${metric.chartType}`;
 
     // Helper for trend class - INVERTED for unfavorable metrics
     const getTrendClass = (val) => {
@@ -783,10 +867,17 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
 
   for (const card of cards) {
     try {
+      // Use baseName for fetching data (original metric name) but name for cache key (includes detail)
+      const metricName = card.baseName || card.name;
+      const detailKey = card.detailKey || '';
 
       let chartDataCurrent, chartDataReference;
       const cacheKey = `${card.name}-${state.selectedPeriod}`;
       const cached = state.chartCache[cacheKey];
+
+      // Generate safe chartId
+      const safeChartName = card.name.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-');
+      const chartId = `chart-${safeChartName}-${card.chartType}`;
 
       // Check cache: Must match period AND total value (to detect global filter changes)
       // We use a small epsilon for float comparison
@@ -799,7 +890,6 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         chartDataReference = cached.dataReference;
 
         // Render both at once from cache
-        const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
         if (chartDataCurrent && chartDataCurrent.length > 0) {
           if (card.chartType === 'line') {
             renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
@@ -808,15 +898,14 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           }
         }
       } else {
-        const chartId = `chart-${card.name.replace(/\s+/g, '-')}-${card.chartType}`;
-
         // Progressive loading: Fetch and render REFERENCE period first (gray bars)
         chartDataReference = await fetchChartDataByGranularity(
           worksheet,
           dateFieldName,
-          card.name,
+          metricName,
           periods.prevMonth,
-          card.tooltipFields // Pass tooltip fields
+          card.tooltipFields,
+          detailKey
         );
 
         // Render reference period first (pass empty array for current)
@@ -830,9 +919,10 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         chartDataCurrent = await fetchChartDataByGranularity(
           worksheet,
           dateFieldName,
-          card.name,
+          metricName,
           periods.current,
-          card.tooltipFields // Pass tooltip fields
+          card.tooltipFields,
+          detailKey
         );
 
         // Re-render with both current and reference data
@@ -857,21 +947,24 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
 }
 
 // Fetch chart data with granularity support
-async function fetchChartDataByGranularity(worksheet, dateFieldName, metricField, range, tooltipFields = []) {
+async function fetchChartDataByGranularity(worksheet, dateFieldName, metricField, range, tooltipFields = [], detailKey = '') {
   const granularity = state.granularity || 'days';
 
   if (granularity === 'days') {
-    return await fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields);
+    return await fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields, detailKey);
   } else {
-    return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity);
+    return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey);
   }
 }
 
 // Fetch aggregated data for weeks/months/quarters/years
-async function fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], granularity) {
+async function fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], granularity, detailKey = '') {
   try {
     const dataPoints = [];
     const periods = generatePeriods(range.start, range.end, granularity);
+
+    // Get detail fields for filtering
+    const detailFields = state.encodings?.detailFields || [];
 
     for (const period of periods) {
       await worksheet.applyRangeFilterAsync(dateFieldName, {
@@ -881,6 +974,13 @@ async function fetchAggregatedChartData(worksheet, dateFieldName, metricField, r
 
       const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
       const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+
+      // Find indices for detail fields
+      const detailColIndices = {};
+      detailFields.forEach(dName => {
+        const idx = summary.columns.findIndex(c => c.fieldName === dName);
+        if (idx !== -1) detailColIndices[dName] = idx;
+      });
 
       // Find indices for tooltip fields
       const tooltipIndices = tooltipFields.map(tf => ({
@@ -894,6 +994,20 @@ async function fetchAggregatedChartData(worksheet, dateFieldName, metricField, r
 
       if (metricIndex !== -1) {
         summary.data.forEach(row => {
+          // Filter by detailKey if specified
+          if (detailKey && detailFields.length > 0) {
+            const detailParts = [];
+            for (const dName of detailFields) {
+              const idx = detailColIndices[dName];
+              if (idx !== undefined) {
+                const val = row[idx].formattedValue || row[idx].nativeValue || '';
+                detailParts.push(String(val));
+              }
+            }
+            const rowDetailKey = detailParts.join(' | ');
+            if (rowDetailKey !== detailKey) return; // Skip rows that don't match
+          }
+
           const val = row[metricIndex].nativeValue;
           if (typeof val === 'number') periodValue += val;
 
@@ -1015,8 +1129,11 @@ function generatePeriods(startDate, endDate, granularity) {
   return periods;
 }
 
-async function fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields = []) {
+async function fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], detailKey = '') {
   try {
+    // Get detail fields for filtering
+    const detailFields = state.encodings?.detailFields || [];
+
     // Попытка оптимизированного пути: один запрос на весь диапазон
     await worksheet.applyRangeFilterAsync(dateFieldName, {
       min: range.start,
@@ -1026,6 +1143,13 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
     const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
     const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
     const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+
+    // Find indices for detail fields
+    const detailColIndices = {};
+    detailFields.forEach(dName => {
+      const idx = summary.columns.findIndex(c => c.fieldName === dName);
+      if (idx !== -1) detailColIndices[dName] = idx;
+    });
 
     // Если дата колонка недоступна в summary (например, только в фильтре) —
     // откатываемся к старому надёжному, но более тяжёлому алгоритму по дням.
@@ -1050,6 +1174,13 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
         const daySummary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
         const metricIdx = daySummary.columns.findIndex(c => c.fieldName === metricField);
 
+        // Find indices for detail fields in day summary
+        const dayDetailColIndices = {};
+        detailFields.forEach(dName => {
+          const idx = daySummary.columns.findIndex(c => c.fieldName === dName);
+          if (idx !== -1) dayDetailColIndices[dName] = idx;
+        });
+
         const tooltipIndicesFallback = tooltipFields.map(tf => ({
           name: tf,
           index: daySummary.columns.findIndex(c => c.fieldName === tf)
@@ -1061,6 +1192,20 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
 
         if (metricIdx !== -1) {
           daySummary.data.forEach(row => {
+            // Filter by detailKey if specified
+            if (detailKey && detailFields.length > 0) {
+              const detailParts = [];
+              for (const dName of detailFields) {
+                const idx = dayDetailColIndices[dName];
+                if (idx !== undefined) {
+                  const val = row[idx].formattedValue || row[idx].nativeValue || '';
+                  detailParts.push(String(val));
+                }
+              }
+              const rowDetailKey = detailParts.join(' | ');
+              if (rowDetailKey !== detailKey) return; // Skip rows that don't match
+            }
+
             const val = row[metricIdx].nativeValue;
             if (typeof val === 'number') dailyValue += val;
 
@@ -1106,6 +1251,20 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
     const grouped = new Map();
 
     summary.data.forEach(row => {
+      // Filter by detailKey if specified
+      if (detailKey && detailFields.length > 0) {
+        const detailParts = [];
+        for (const dName of detailFields) {
+          const idx = detailColIndices[dName];
+          if (idx !== undefined) {
+            const val = row[idx].formattedValue || row[idx].nativeValue || '';
+            detailParts.push(String(val));
+          }
+        }
+        const rowDetailKey = detailParts.join(' | ');
+        if (rowDetailKey !== detailKey) return; // Skip rows that don't match
+      }
+
       const rawDate = row[dateIndex].nativeValue;
       if (!rawDate) return;
       const d = new Date(rawDate);
