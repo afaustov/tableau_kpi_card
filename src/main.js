@@ -613,6 +613,17 @@ function renderKPIs(metrics, showSkeleton = false) {
   const container = document.getElementById('kpi-container');
   container.innerHTML = '';
 
+  // Calculate optimal columns
+  const count = metrics.length;
+  let cols = 1;
+  if (count <= 3) cols = count;
+  else if (count === 4) cols = 2;
+  else if (count <= 6) cols = 3;
+  else cols = 4; // Cap at 4 for readability on standard screens
+
+  container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  container.style.gridAutoRows = '1fr';
+
   metrics.forEach(metric => {
     const item = document.createElement('div');
     item.className = 'kpi-item';
@@ -675,7 +686,7 @@ function renderKPIs(metrics, showSkeleton = false) {
       }
       </div>
       
-      <div id="${chartId}" class="bar-chart-container" style="width: 100%; flex: 1; min-height: 100px; margin-top: 12px; display: flex; align-items: flex-end;"></div>
+      <div id="${chartId}" class="bar-chart-container" style="width: 100%; flex: 1; min-height: 0; margin-top: 12px; display: flex; align-items: flex-end;"></div>
     `;
 
     // Tooltip events - ONLY on the big value
