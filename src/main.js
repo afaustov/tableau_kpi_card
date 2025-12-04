@@ -1015,77 +1015,90 @@ function generatePeriods(startDate, endDate, granularity) {
   return periods;
 }
 
+// Fetch daily data in ONE request and group by day on the client.
+// Это сохраняет корректность для процентов: мы не суммируем разные дни,
+// а используем те агрегаты, которые уже вернул Tableau для каждой даты.
 async function fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields = []) {
   try {
-    const dataPoints = [];
-    const startDate = new Date(range.start);
-    const endDate = new Date(range.end);
+    // Один фильтр на весь диапазон
+    await worksheet.applyRangeFilterAsync(dateFieldName, {
+      min: range.start,
+      max: range.end
+    });
 
-    // Iterate through each day in the range
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dayStart = new Date(d);
-      dayStart.setUTCHours(0, 0, 0, 0);
-      const dayEnd = new Date(d);
-      dayEnd.setUTCHours(23, 59, 59, 999);
+    const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+    const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
+    const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
 
-      await worksheet.applyRangeFilterAsync(dateFieldName, {
-        min: dayStart,
-        max: dayEnd
-      });
+    // Индексы для доп. полей тултипа
+    const tooltipIndices = tooltipFields.map(tf => ({
+      name: tf,
+      index: summary.columns.findIndex(c => c.fieldName === tf)
+    }));
 
-      const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
-      const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
-      const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+    // Группируем по дате (ключ YYYY-MM-DD)
+    const grouped = new Map();
 
-      // Find indices for tooltip fields
-      const tooltipIndices = tooltipFields.map(tf => ({
-        name: tf,
-        index: summary.columns.findIndex(c => c.fieldName === tf)
-      }));
+    if (metricIndex !== -1 && dateIndex !== -1) {
+      summary.data.forEach(row => {
+        const rawDate = row[dateIndex].nativeValue;
+        if (!rawDate) return;
+        const d = new Date(rawDate);
+        // Нормализуем к дню
+        d.setUTCHours(0, 0, 0, 0);
+        const key = d.toISOString().slice(0, 10);
 
-      let dailyValue = 0;
-      const dailyTooltipValues = {};
-      // Initialize with null to distinguish between 0 and no data/string
-      tooltipFields.forEach(tf => dailyTooltipValues[tf] = { val: null, fmt: '' });
-
-      if (metricIndex !== -1) {
-        summary.data.forEach(row => {
-          const val = row[metricIndex].nativeValue;
-          if (typeof val === 'number') dailyValue += val;
-
-          // Aggregate tooltip fields
-          tooltipIndices.forEach(ti => {
-            if (ti.index !== -1) {
-              const tVal = row[ti.index].nativeValue;
-
-              if (typeof tVal === 'number') {
-                // If it's a number, sum it (initialize if null)
-                if (dailyTooltipValues[ti.name].val === null) dailyTooltipValues[ti.name].val = 0;
-                dailyTooltipValues[ti.name].val += tVal;
-              } else {
-                // If it's a string/other, just take the value (last one wins)
-                dailyTooltipValues[ti.name].val = tVal;
-              }
-
-              if (!dailyTooltipValues[ti.name].fmt && row[ti.index].formattedValue) {
-                dailyTooltipValues[ti.name].fmt = row[ti.index].formattedValue;
-              }
-            }
+        if (!grouped.has(key)) {
+          const tooltipInit = {};
+          tooltipFields.forEach(tf => {
+            tooltipInit[tf] = { val: null, fmt: '' };
           });
-        });
-      }
+          grouped.set(key, {
+            date: d,
+            value: 0,
+            tooltipValues: tooltipInit
+          });
+        }
 
-      dataPoints.push({
-        date: new Date(dayStart),
-        value: dailyValue,
-        tooltipValues: dailyTooltipValues
+        const bucket = grouped.get(key);
+        const val = row[metricIndex].nativeValue;
+
+        // Если метрика – число, аккумулируем сумму (как и раньше).
+        if (typeof val === 'number') {
+          bucket.value += val;
+        } else if (bucket.value === 0 && typeof val !== 'undefined') {
+          // Если это не число (например, %, строка) — берём как есть для этого дня.
+          // Мы не суммируем разные дни, только разные строки одного дня.
+          bucket.value = val;
+        }
+
+        // Агрегация tooltip-полей
+        tooltipIndices.forEach(ti => {
+          if (ti.index === -1) return;
+          const cell = row[ti.index];
+          const tVal = cell.nativeValue;
+          const tFmt = cell.formattedValue;
+          const tv = bucket.tooltipValues[ti.name];
+
+          if (typeof tVal === 'number') {
+            if (tv.val === null) tv.val = 0;
+            tv.val += tVal;
+          } else if (tVal !== undefined && tVal !== null) {
+            tv.val = tVal;
+          }
+
+          if (!tv.fmt && tFmt) {
+            tv.fmt = tFmt;
+          }
+        });
       });
     }
 
-    // Clear filter after loop
+    // Сортируем по дате
+    const dataPoints = Array.from(grouped.values()).sort((a, b) => a.date - b.date);
+
     await worksheet.clearFilterAsync(dateFieldName);
     return dataPoints;
-
   } catch (e) {
     return [];
   }
@@ -1214,25 +1227,39 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       .text(formatDate(endDate));
   }
 
-  // --- Interaction Layer (Brush + Hover) ---
-  setupBrushInteraction(
-    svg,
-    width,
-    height,
-    margin,
-    x,
-    currentData,
-    referenceData,
-    metricName,
-    isPercentage,
-    isUnfavorable,
-    'bar',
-    elementId,
-    tooltipFields
-  );
+  // Простая интерактивность: hover по отдельным барам
+  if (hasCurrent) {
+    attachBarHoverInteraction(container, currentData, referenceData, metricName, isPercentage, isUnfavorable, tooltipFields);
+  }
 }
 
-// Render line chart for metric
+// Для баров: наведение на колонку показывает tooltip и подсветку.
+function attachBarHoverInteraction(containerEl, currentData, referenceData, metricName, isPct, isUnfavorable, tooltipFields = []) {
+  const bars = containerEl.querySelectorAll('.bar-current');
+  bars.forEach((barEl, i) => {
+    const d = currentData[i];
+    if (!d) return;
+    const refVal = referenceData ? (referenceData[i]?.value || 0) : 0;
+
+    barEl.style.cursor = 'pointer';
+
+    barEl.addEventListener('mouseenter', (e) => {
+      showTooltipForBar(e, d.date, d.value, refVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
+      barEl.classList.add('active');
+    });
+
+    barEl.addEventListener('mouseleave', () => {
+      hideTooltip();
+      barEl.classList.remove('active');
+    });
+
+    barEl.addEventListener('mousemove', (e) => {
+      lastEvent = e;
+      updateTooltipPosition();
+    });
+  });
+}
+
 // Render line chart for metric
 function renderLineChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable, tooltipFields = []) {
   const container = document.getElementById(elementId);
