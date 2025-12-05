@@ -15,7 +15,8 @@ let state = {
   lastStateHash: null, // Hash to detect real changes
   chartCache: {}, // Cache for chart data to avoid re-fetching
   currentSessionId: 0, // Session ID for cancellation mechanism
-  specCheckInterval: null // Interval for polling visual spec changes
+  specCheckInterval: null, // Interval for polling visual spec changes
+  lastSpecHash: null // Last visual spec hash for change detection
 };
 
 // Helper function to check if the current session is still valid
@@ -276,7 +277,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Polling for visual specification changes (Details, metrics, encodings)
     // These changes don't always trigger SummaryDataChanged event
-    let lastSpecHash = await computeStateHash(worksheet);
+    state.lastSpecHash = await computeStateHash(worksheet);
     const checkSpecChanges = async () => {
       if (state.isApplyingOwnFilters || state.isCalculating) {
         return;
@@ -284,8 +285,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       try {
         const currentSpecHash = await computeStateHash(worksheet);
-        if (currentSpecHash !== lastSpecHash) {
-          lastSpecHash = currentSpecHash;
+        if (currentSpecHash !== state.lastSpecHash) {
+          state.lastSpecHash = currentSpecHash;
           state.lastStateHash = null; // Force refresh
           await refreshKPIs(worksheet);
         }
@@ -748,7 +749,9 @@ async function refreshKPIs(worksheet) {
     loadChartsAsync(worksheet, dateFieldName, cards, periods, sessionId);
 
     // Update state hash after successful refresh
-    state.lastStateHash = await computeStateHash(worksheet);
+    const newHash = await computeStateHash(worksheet);
+    state.lastStateHash = newHash;
+    state.lastSpecHash = newHash; // Update polling hash to prevent infinite loop
 
   } catch (e) {
     // showDebug('Refresh Error: ' + e.message);
