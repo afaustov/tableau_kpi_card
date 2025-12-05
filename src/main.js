@@ -14,7 +14,8 @@ let state = {
   handleDataChange: null,
   lastStateHash: null, // Hash to detect real changes
   chartCache: {}, // Cache for chart data to avoid re-fetching
-  currentSessionId: 0 // Session ID for cancellation mechanism
+  currentSessionId: 0, // Session ID for cancellation mechanism
+  specCheckInterval: null // Interval for polling visual spec changes
 };
 
 // Helper function to check if the current session is still valid
@@ -272,6 +273,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       handleDataChange
     );
     state.handleDataChange = handleDataChange;
+
+    // Polling for visual specification changes (Details, metrics, encodings)
+    // These changes don't always trigger SummaryDataChanged event
+    let lastSpecHash = await computeStateHash(worksheet);
+    const checkSpecChanges = async () => {
+      if (state.isApplyingOwnFilters || state.isCalculating) {
+        return;
+      }
+
+      try {
+        const currentSpecHash = await computeStateHash(worksheet);
+        if (currentSpecHash !== lastSpecHash) {
+          lastSpecHash = currentSpecHash;
+          state.lastStateHash = null; // Force refresh
+          await refreshKPIs(worksheet);
+        }
+      } catch (e) {
+        // Ignore errors in polling
+      }
+    };
+
+    // Check for spec changes every 500ms
+    const specCheckInterval = setInterval(checkSpecChanges, 500);
+    state.specCheckInterval = specCheckInterval;
 
     // Initial load
     await refreshKPIs(worksheet);
