@@ -13,8 +13,14 @@ let state = {
   unregisterDataHandler: null,
   handleDataChange: null,
   lastStateHash: null, // Hash to detect real changes
-  chartCache: {} // Cache for chart data to avoid re-fetching
+  chartCache: {}, // Cache for chart data to avoid re-fetching
+  currentSessionId: 0 // Session ID for cancellation mechanism
 };
+
+// Helper function to check if the current session is still valid
+function isSessionValid(sessionId) {
+  return sessionId === state.currentSessionId;
+}
 
 // Granularity options for each period
 const granularityConfig = {
@@ -396,7 +402,14 @@ async function computeStateHash(worksheet) {
 }
 
 async function refreshKPIs(worksheet) {
-  if (state.isCalculating) return;
+  // Increment session ID to cancel any in-progress operations
+  state.currentSessionId++;
+  const sessionId = state.currentSessionId;
+
+  // Clear chart cache on new refresh to force re-fetch
+  state.chartCache = {};
+
+  // If already calculating, we still continue - we've invalidated the old session
   state.isCalculating = true;
   state.isApplyingOwnFilters = true;
 
@@ -706,8 +719,8 @@ async function refreshKPIs(worksheet) {
     // Render KPIs immediately with skeleton charts
     renderKPIs(cards, true); // true = show skeleton
 
-    // Lazy load charts in background
-    loadChartsAsync(worksheet, dateFieldName, cards, periods);
+    // Lazy load charts in background (pass sessionId for cancellation check)
+    loadChartsAsync(worksheet, dateFieldName, cards, periods, sessionId);
 
     // Update state hash after successful refresh
     state.lastStateHash = await computeStateHash(worksheet);
@@ -904,9 +917,14 @@ function renderSkeletonLineChart(elementId) {
 }
 
 // Lazy load charts (bars and lines) in background
-async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
+async function loadChartsAsync(worksheet, dateFieldName, cards, periods, sessionId) {
 
   for (const card of cards) {
+    // Check if session is still valid before processing each card
+    if (!isSessionValid(sessionId)) {
+      return; // Abort - a new refresh has started
+    }
+
     try {
       // Use baseName for fetching data (original metric name) but name for cache key (includes detail)
       const metricName = card.baseName || card.name;
@@ -955,8 +973,14 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           metricName,
           periods.prevMonth,
           card.tooltipFields,
-          detailKey
+          detailKey,
+          sessionId
         );
+
+        // Check session validity after async operation
+        if (!isSessionValid(sessionId)) {
+          return; // Abort - a new refresh has started
+        }
 
         // Render reference period first (pass empty array for current)
         if (card.chartType === 'line') {
@@ -972,8 +996,14 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
           metricName,
           periods.current,
           card.tooltipFields,
-          detailKey
+          detailKey,
+          sessionId
         );
+
+        // Check session validity after async operation
+        if (!isSessionValid(sessionId)) {
+          return; // Abort - a new refresh has started
+        }
 
         // Re-render with both current and reference data
         if (card.chartType === 'line') {
@@ -991,32 +1021,33 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         };
       }
     } catch (e) {
+      // Session was cancelled or other error - silently continue
     }
   }
 
 }
 
 // Fetch chart data with granularity support
-async function fetchChartDataByGranularity(worksheet, dateFieldName, metricField, range, tooltipFields = [], detailKey = '') {
+async function fetchChartDataByGranularity(worksheet, dateFieldName, metricField, range, tooltipFields = [], detailKey = '', sessionId = null) {
   const granularity = state.granularity || 'days';
 
   if (granularity === 'days') {
-    return await fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields, detailKey);
+    return await fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields, detailKey, sessionId);
   } else {
     // Check if metric can be pre-aggregated (SUM, CNT, MIN, MAX)
     // For these, we fetch all data in one query and aggregate locally
     if (canPreaggregate(metricField)) {
-      return await fetchPreaggregatableChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey);
+      return await fetchPreaggregatableChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey, sessionId);
     } else {
       // For CNTD, AVG, AGG etc. - use separate queries per period (slower but accurate)
-      return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey);
+      return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey, sessionId);
     }
   }
 }
 
 // Optimized fetch for pre-aggregatable functions (SUM, CNT, MIN, MAX)
 // Fetches all data in ONE query and aggregates locally by period
-async function fetchPreaggregatableChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], granularity, detailKey = '') {
+async function fetchPreaggregatableChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], granularity, detailKey = '', sessionId = null) {
   try {
     const periods = generatePeriods(range.start, range.end, granularity);
     const detailFields = state.encodings?.detailFields || [];
@@ -1029,13 +1060,20 @@ async function fetchPreaggregatableChartData(worksheet, dateFieldName, metricFie
     });
 
     const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+
+    // Check session validity after async operation
+    if (sessionId !== null && !isSessionValid(sessionId)) {
+      await worksheet.clearFilterAsync(dateFieldName);
+      return [];
+    }
+
     const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
     const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
 
     // If date column is not available, fall back to slow method
     if (dateIndex === -1 || metricIndex === -1) {
       await worksheet.clearFilterAsync(dateFieldName);
-      return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey);
+      return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey, sessionId);
     }
 
     // Find indices for detail fields
@@ -1170,7 +1208,7 @@ async function fetchPreaggregatableChartData(worksheet, dateFieldName, metricFie
 }
 
 // Fetch aggregated data for weeks/months/quarters/years (SLOW - separate query per period)
-async function fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], granularity, detailKey = '') {
+async function fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], granularity, detailKey = '', sessionId = null) {
   try {
     const dataPoints = [];
     const periods = generatePeriods(range.start, range.end, granularity);
@@ -1179,12 +1217,24 @@ async function fetchAggregatedChartData(worksheet, dateFieldName, metricField, r
     const detailFields = state.encodings?.detailFields || [];
 
     for (const period of periods) {
+      // Check session validity before each period
+      if (sessionId !== null && !isSessionValid(sessionId)) {
+        await worksheet.clearFilterAsync(dateFieldName);
+        return [];
+      }
+
       await worksheet.applyRangeFilterAsync(dateFieldName, {
         min: period.start,
         max: period.end
       });
 
       const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+
+      // Check session validity after async operation
+      if (sessionId !== null && !isSessionValid(sessionId)) {
+        await worksheet.clearFilterAsync(dateFieldName);
+        return [];
+      }
       const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
 
       // Find indices for detail fields
@@ -1341,7 +1391,7 @@ function generatePeriods(startDate, endDate, granularity) {
   return periods;
 }
 
-async function fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], detailKey = '') {
+async function fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], detailKey = '', sessionId = null) {
   try {
     // Get detail fields for filtering
     const detailFields = state.encodings?.detailFields || [];
@@ -1353,6 +1403,13 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
     });
 
     const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+
+    // Check session validity after async operation
+    if (sessionId !== null && !isSessionValid(sessionId)) {
+      await worksheet.clearFilterAsync(dateFieldName);
+      return [];
+    }
+
     const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
     const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
 
@@ -1373,6 +1430,12 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
       const endDate = new Date(range.end);
 
       for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        // Check session validity before each day
+        if (sessionId !== null && !isSessionValid(sessionId)) {
+          await worksheet.clearFilterAsync(dateFieldName);
+          return [];
+        }
+
         const dayStart = new Date(d);
         dayStart.setUTCHours(0, 0, 0, 0);
         const dayEnd = new Date(d);
@@ -1384,6 +1447,13 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
         });
 
         const daySummary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+
+        // Check session validity after async operation
+        if (sessionId !== null && !isSessionValid(sessionId)) {
+          await worksheet.clearFilterAsync(dateFieldName);
+          return [];
+        }
+
         const metricIdx = daySummary.columns.findIndex(c => c.fieldName === metricField);
 
         // Find indices for detail fields in day summary
