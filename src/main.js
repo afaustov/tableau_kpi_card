@@ -275,8 +275,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     );
     state.handleDataChange = handleDataChange;
 
-    // Polling for visual specification changes (Details, metrics, encodings)
-    // These changes don't always trigger SummaryDataChanged event
+    // TEMPORARILY DISABLED: Polling for visual specification changes
+    // This was causing infinite loops - needs better implementation
+    /*
     state.lastSpecHash = await computeStateHash(worksheet);
     const checkSpecChanges = async () => {
       if (state.isApplyingOwnFilters || state.isCalculating) {
@@ -298,6 +299,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check for spec changes every 500ms
     const specCheckInterval = setInterval(checkSpecChanges, 500);
     state.specCheckInterval = specCheckInterval;
+    */
 
     // Initial load
     await refreshKPIs(worksheet);
