@@ -977,113 +977,119 @@ function renderSkeletonLineChart(elementId) {
 
 // Lazy load charts (bars and lines) in background
 async function loadChartsAsync(worksheet, dateFieldName, cards, periods, sessionId) {
+  // Set flag to prevent SummaryDataChanged events during chart loading from triggering refresh
+  state.isApplyingOwnFilters = true;
 
-  for (const card of cards) {
-    // Check if session is still valid before processing each card
-    if (!isSessionValid(sessionId)) {
-      return; // Abort - a new refresh has started
-    }
+  try {
+    for (const card of cards) {
+      // Check if session is still valid before processing each card
+      if (!isSessionValid(sessionId)) {
+        return; // Abort - a new refresh has started
+      }
 
-    try {
-      // Use baseName for fetching data (original metric name) but name for cache key (includes detail)
-      const metricName = card.baseName || card.name;
-      const detailKey = card.detailKey || '';
+      try {
+        // Use baseName for fetching data (original metric name) but name for cache key (includes detail)
+        const metricName = card.baseName || card.name;
+        const detailKey = card.detailKey || '';
 
-      let chartDataCurrent, chartDataReference;
-      const cacheKey = `${card.name}-${state.selectedPeriod}`;
-      const cached = state.chartCache[cacheKey];
+        let chartDataCurrent, chartDataReference;
+        const cacheKey = `${card.name}-${state.selectedPeriod}`;
+        const cached = state.chartCache[cacheKey];
 
-      // Generate safe chartId
-      const safeChartName = card.name.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-');
-      const chartId = `chart-${safeChartName}-${card.chartType}`;
+        // Generate safe chartId
+        const safeChartName = card.name.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-');
+        const chartId = `chart-${safeChartName}-${card.chartType}`;
 
-      // Format subtitle: "Metric Name Rolling 30 Days: Detail Value"
-      const periodText = state.selectedPeriod === 'rolling'
-        ? `Rolling ${state.rollingCount} ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`
-        : `${state.selectedPeriod.toUpperCase()} - ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`;
+        // Format subtitle: "Metric Name Rolling 30 Days: Detail Value"
+        const periodText = state.selectedPeriod === 'rolling'
+          ? `Rolling ${state.rollingCount} ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`
+          : `${state.selectedPeriod.toUpperCase()} - ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`;
 
-      const subtitleText = card.detailKey
-        ? `${card.baseName} ${periodText}: ${card.detailKey}`
-        : `${card.baseName} ${periodText}`;
+        const subtitleText = card.detailKey
+          ? `${card.baseName} ${periodText}: ${card.detailKey}`
+          : `${card.baseName} ${periodText}`;
 
-      // Check cache: Must match period AND total value (to detect global filter changes)
-      // We use a small epsilon for float comparison
-      const isCacheValid = cached &&
-        Math.abs(cached.totalCurrent - card.current) < 0.01 &&
-        Math.abs(cached.totalReference - card.reference) < 0.01;
+        // Check cache: Must match period AND total value (to detect global filter changes)
+        // We use a small epsilon for float comparison
+        const isCacheValid = cached &&
+          Math.abs(cached.totalCurrent - card.current) < 0.01 &&
+          Math.abs(cached.totalReference - card.reference) < 0.01;
 
-      if (isCacheValid) {
-        chartDataCurrent = cached.dataCurrent;
-        chartDataReference = cached.dataReference;
+        if (isCacheValid) {
+          chartDataCurrent = cached.dataCurrent;
+          chartDataReference = cached.dataReference;
 
-        // Render both at once from cache
-        if (chartDataCurrent && chartDataCurrent.length > 0) {
+          // Render both at once from cache
+          if (chartDataCurrent && chartDataCurrent.length > 0) {
+            if (card.chartType === 'line') {
+              renderLineChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+            } else {
+              renderBarChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+            }
+          }
+        } else {
+          // Progressive loading: Fetch and render REFERENCE period first (gray bars)
+          chartDataReference = await fetchChartDataByGranularity(
+            worksheet,
+            dateFieldName,
+            metricName,
+            periods.prevMonth,
+            card.tooltipFields,
+            detailKey,
+            sessionId
+          );
+
+          // Check session validity after async operation
+          if (!isSessionValid(sessionId)) {
+            return; // Abort - a new refresh has started
+          }
+
+          // Render reference period first (pass empty array for current)
+          if (card.chartType === 'line') {
+            renderLineChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+          } else {
+            renderBarChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+          }
+
+          // Fetch chart data for CURRENT period
+          chartDataCurrent = await fetchChartDataByGranularity(
+            worksheet,
+            dateFieldName,
+            metricName,
+            periods.current,
+            card.tooltipFields,
+            detailKey,
+            sessionId
+          );
+
+          // Check session validity after async operation
+          if (!isSessionValid(sessionId)) {
+            return; // Abort - a new refresh has started
+          }
+
+          // Re-render with both current and reference data
           if (card.chartType === 'line') {
             renderLineChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
           } else {
             renderBarChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
           }
+
+          // Update cache
+          state.chartCache[cacheKey] = {
+            totalCurrent: card.current,
+            totalReference: card.reference,
+            dataCurrent: chartDataCurrent,
+            dataReference: chartDataReference
+          };
         }
-      } else {
-        // Progressive loading: Fetch and render REFERENCE period first (gray bars)
-        chartDataReference = await fetchChartDataByGranularity(
-          worksheet,
-          dateFieldName,
-          metricName,
-          periods.prevMonth,
-          card.tooltipFields,
-          detailKey,
-          sessionId
-        );
-
-        // Check session validity after async operation
-        if (!isSessionValid(sessionId)) {
-          return; // Abort - a new refresh has started
-        }
-
-        // Render reference period first (pass empty array for current)
-        if (card.chartType === 'line') {
-          renderLineChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
-        } else {
-          renderBarChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
-        }
-
-        // Fetch chart data for CURRENT period
-        chartDataCurrent = await fetchChartDataByGranularity(
-          worksheet,
-          dateFieldName,
-          metricName,
-          periods.current,
-          card.tooltipFields,
-          detailKey,
-          sessionId
-        );
-
-        // Check session validity after async operation
-        if (!isSessionValid(sessionId)) {
-          return; // Abort - a new refresh has started
-        }
-
-        // Re-render with both current and reference data
-        if (card.chartType === 'line') {
-          renderLineChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
-        } else {
-          renderBarChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
-        }
-
-        // Update cache
-        state.chartCache[cacheKey] = {
-          totalCurrent: card.current,
-          totalReference: card.reference,
-          dataCurrent: chartDataCurrent,
-          dataReference: chartDataReference
-        };
+      } catch (e) {
+        // Session was cancelled or other error - silently continue
       }
-    } catch (e) {
-      // Session was cancelled or other error - silently continue
     }
+  } finally {
+    // Reset flag after all chart loading is complete
+    state.isApplyingOwnFilters = false;
   }
-
 }
 
 // Fetch chart data with granularity support
