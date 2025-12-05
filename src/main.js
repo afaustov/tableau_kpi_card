@@ -398,9 +398,33 @@ async function computeStateHash(worksheet) {
       hashParts.push(`dates:${dateFields.join(',')}`);
     }
 
-    // 2. Get active filters
+    // 2. Get active filters (exclude date filters that we apply temporarily)
     const filters = await worksheet.getFiltersAsync();
+
+    // Get date field name to exclude it from filter hash
+    let dateFieldToExclude = null;
+    if (typeof worksheet.getVisualSpecificationAsync === 'function') {
+      try {
+        const spec = await worksheet.getVisualSpecificationAsync();
+        const encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
+        const dateFields = encodings
+          .filter(e => e.id === 'date')
+          .map(e => e.field?.name || e.field || e.fieldName)
+          .filter(Boolean);
+        dateFieldToExclude = dateFields[0] || null;
+      } catch (e) {
+        // Ignore
+      }
+    }
+
     const filterHash = filters
+      .filter(f => {
+        // Exclude date filters that we apply temporarily in refreshKPIs
+        if (dateFieldToExclude && f.fieldName === dateFieldToExclude) {
+          return false;
+        }
+        return true;
+      })
       .map(f => {
         let filterStr = `${f.fieldName}:${f.filterType}`;
 
