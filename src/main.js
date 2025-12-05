@@ -11,7 +11,9 @@ let state = {
   isCalculating: false,
   isApplyingOwnFilters: false,
   unregisterDataHandler: null,
+  unregisterFilterHandler: null,
   handleDataChange: null,
+  handleFilterChange: null,
   lastStateHash: null, // Hash to detect real changes
   chartCache: {}, // Cache for chart data to avoid re-fetching
   currentSessionId: 0, // Session ID for cancellation mechanism
@@ -272,37 +274,33 @@ document.addEventListener('DOMContentLoaded', async () => {
       }, 1000); // Longer debounce to avoid rapid refreshes
     };
 
+    // Event-based change detection (no polling!)
+    // Handle data changes - this catches: sorting, data updates, Details changes, metrics changes
     state.unregisterDataHandler = worksheet.addEventListener(
       window.tableau.TableauEventType.SummaryDataChanged,
       handleDataChange
     );
     state.handleDataChange = handleDataChange;
 
-    // TEMPORARILY DISABLED: Polling for visual specification changes
-    // This was causing infinite loops - needs better implementation
-    /*
-    state.lastSpecHash = await computeStateHash(worksheet);
-    const checkSpecChanges = async () => {
-      if (state.isApplyingOwnFilters || state.isCalculating) {
+    // Also listen for filter changes explicitly
+    const handleFilterChange = async () => {
+      if (state.isApplyingOwnFilters) {
         return;
       }
 
-      try {
-        const currentSpecHash = await computeStateHash(worksheet);
-        if (currentSpecHash !== state.lastSpecHash) {
-          state.lastSpecHash = currentSpecHash;
-          state.lastStateHash = null; // Force refresh
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(async () => {
+        if (!state.isApplyingOwnFilters) {
           await refreshKPIs(worksheet);
         }
-      } catch (e) {
-        // Ignore errors in polling
-      }
+      }, 1000);
     };
 
-    // Check for spec changes every 500ms
-    const specCheckInterval = setInterval(checkSpecChanges, 500);
-    state.specCheckInterval = specCheckInterval;
-    */
+    state.unregisterFilterHandler = worksheet.addEventListener(
+      window.tableau.TableauEventType.FilterChanged,
+      handleFilterChange
+    );
+    state.handleFilterChange = handleFilterChange;
 
     // Initial load
     await refreshKPIs(worksheet);
