@@ -232,12 +232,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(async () => {
         if (!state.isApplyingOwnFilters) {
-          // Check if there are real changes before refreshing
-          const hasChanges = await checkForChanges(worksheet);
-          if (hasChanges) {
-            await refreshKPIs(worksheet);
-          } else {
-          }
+          // Always refresh on data change to catch sorting/data updates
+          // checkForChanges is too aggressive caching and misses sorting changes
+          await refreshKPIs(worksheet);
         }
       }, 1000); // Longer debounce to avoid rapid refreshes
     };
@@ -799,7 +796,7 @@ function renderKPIs(metrics, showSkeleton = false) {
     const bigValueEl = item.querySelector('.big-value');
     if (bigValueEl) {
       bigValueEl.style.cursor = 'help'; // Indicate hoverable
-      bigValueEl.addEventListener('mouseenter', (e) => showTooltipForMetric(e, metric));
+      bigValueEl.addEventListener('mouseenter', (e) => showTooltipForMetric(e, metric, subtitleText));
       bigValueEl.addEventListener('mouseleave', hideTooltip);
       bigValueEl.addEventListener('mousemove', (e) => {
         lastEvent = e;
@@ -818,9 +815,9 @@ function renderKPIs(metrics, showSkeleton = false) {
       }
     } else if (metric.chartDataCurrent && metric.chartDataCurrent.length > 0) {
       if (metric.chartType === 'line') {
-        renderLineChart(chartId, metric.chartDataCurrent, metric.chartDataReference, metric.name, metric.dateFieldName, metric.isPercentage, metric.isUnfavorable);
+        renderLineChart(chartId, metric.chartDataCurrent, metric.chartDataReference, subtitleText, metric.dateFieldName, metric.isPercentage, metric.isUnfavorable);
       } else {
-        renderBarChart(chartId, metric.chartDataCurrent, metric.chartDataReference, metric.name, metric.dateFieldName, metric.isPercentage, metric.isUnfavorable);
+        renderBarChart(chartId, metric.chartDataCurrent, metric.chartDataReference, subtitleText, metric.dateFieldName, metric.isPercentage, metric.isUnfavorable);
       }
     }
   });
@@ -901,6 +898,15 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
       const safeChartName = card.name.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-');
       const chartId = `chart-${safeChartName}-${card.chartType}`;
 
+      // Format subtitle: "Metric Name Rolling 30 Days: Detail Value"
+      const periodText = state.selectedPeriod === 'rolling'
+        ? `Rolling ${state.rollingCount} ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`
+        : `${state.selectedPeriod.toUpperCase()} - ${state.granularity.charAt(0).toUpperCase() + state.granularity.slice(1)}`;
+
+      const subtitleText = card.detailKey
+        ? `${card.baseName} ${periodText}: ${card.detailKey}`
+        : `${card.baseName} ${periodText}`;
+
       // Check cache: Must match period AND total value (to detect global filter changes)
       // We use a small epsilon for float comparison
       const isCacheValid = cached &&
@@ -914,9 +920,9 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
         // Render both at once from cache
         if (chartDataCurrent && chartDataCurrent.length > 0) {
           if (card.chartType === 'line') {
-            renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+            renderLineChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
           } else {
-            renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+            renderBarChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
           }
         }
       } else {
@@ -932,9 +938,9 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
 
         // Render reference period first (pass empty array for current)
         if (card.chartType === 'line') {
-          renderLineChart(chartId, [], chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+          renderLineChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
         } else {
-          renderBarChart(chartId, [], chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+          renderBarChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
         }
 
         // Fetch chart data for CURRENT period
@@ -949,9 +955,9 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods) {
 
         // Re-render with both current and reference data
         if (card.chartType === 'line') {
-          renderLineChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+          renderLineChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
         } else {
-          renderBarChart(chartId, chartDataCurrent, chartDataReference, card.name, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+          renderBarChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
         }
 
         // Update cache
@@ -1466,57 +1472,21 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       .text(formatDate(endDate));
   }
 
-  // Простая интерактивность: hover по отдельным барам
-  attachBarHoverInteraction(container, primaryData, referenceData, metricName, isPercentage, isUnfavorable, tooltipFields, hasCurrent);
-}
-
-// Для баров: наведение на колонку показывает tooltip и подсветку.
-function attachBarHoverInteraction(containerEl, data, referenceData, metricName, isPct, isUnfavorable, tooltipFields = [], hasCurrent = true) {
-  // Select bars based on what we have. If we have current, we interact with current bars (which are on top or centered).
-  // If we only have ref, we interact with ref bars.
-  // Actually, let's try to interact with whatever is available at that index.
-
-  // Strategy: Iterate through data (which is primaryData) and find corresponding DOM elements
-  data.forEach((d, i) => {
-    // Try to find current bar first, then ref bar
-    let barEl = containerEl.querySelector(`.bar-current:nth-of-type(${i + 1})`);
-    if (!barEl) {
-      barEl = containerEl.querySelector(`.bar-ref:nth-of-type(${i + 1})`);
-    }
-
-    if (!barEl) return;
-
-    const refVal = referenceData ? (referenceData[i]?.value || 0) : 0;
-    // If hasCurrent is false, then d is from referenceData, so value is d.value. 
-    // And refVal is also d.value (since referenceData is primary). 
-    // Wait, if !hasCurrent, data IS referenceData. So d.value is the reference value.
-    // And we want to show it as reference? Or as current?
-    // Usually "Reference" implies comparison. If we only have reference data (loading state or no current data), 
-    // we show it as "Reference" value in tooltip, or just value?
-    // Let's assume:
-    // If hasCurrent: Current = d.value, Ref = refVal
-    // If !hasCurrent: Current = N/A (or 0), Ref = d.value
-
-    const currentVal = hasCurrent ? d.value : 0; // Or null?
-    const referenceVal = hasCurrent ? refVal : d.value;
-
-    barEl.style.cursor = 'pointer';
-
-    barEl.addEventListener('mouseenter', (e) => {
-      showTooltipForBar(e, d.date, currentVal, referenceVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
-      barEl.classList.add('active');
-    });
-
-    barEl.addEventListener('mouseleave', () => {
-      hideTooltip();
-      barEl.classList.remove('active');
-    });
-
-    barEl.addEventListener('mousemove', (e) => {
-      lastEvent = e;
-      updateTooltipPosition();
-    });
+  barEl.addEventListener('mouseenter', (e) => {
+    showTooltipForBar(e, d.date, currentVal, referenceVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
+    barEl.classList.add('active');
   });
+
+  barEl.addEventListener('mouseleave', () => {
+    hideTooltip();
+    barEl.classList.remove('active');
+  });
+
+  barEl.addEventListener('mousemove', (e) => {
+    lastEvent = e;
+    updateTooltipPosition();
+  });
+});
 }
 
 // Render line chart for metric
@@ -2037,8 +2007,8 @@ function updateTooltipPosition() {
   rafId = null;
 }
 
-function showTooltipForMetric(e, metric) {
-  tooltip.innerHTML = generateTooltipContent(metric);
+function showTooltipForMetric(e, metric, subtitleText) {
+  tooltip.innerHTML = generateTooltipContent(metric, subtitleText);
   tooltip.classList.remove('hidden');
   lastEvent = e;
   updateTooltipPosition();
@@ -2052,7 +2022,7 @@ function hideTooltip() {
   }
 }
 
-function generateTooltipContent(metric) {
+function generateTooltipContent(metric, subtitleText) {
   const currentRange = getRange(state.selectedPeriod, new Date());
   const prevMonthRange = getPrevMonthRange(currentRange);
   const prevYearRange = getPrevYearRange(currentRange);
@@ -2095,8 +2065,10 @@ function generateTooltipContent(metric) {
     extraFieldsHtml += '</div>';
   }
 
+  const headerText = subtitleText || metric.name;
+
   return `
-    <div class="tooltip-header">${metric.name}</div>
+    <div class="tooltip-header">${headerText}</div>
     <div class="tooltip-section">
       <div class="tooltip-main-value">${formatNumber(metric.current, metric.isPercentage)}</div>
       <div class="tooltip-row"><span class="tooltip-label">Period:</span><span class="tooltip-value">${formatDate(currentRange.start)} - ${formatDate(currentRange.end)}</span></div>
