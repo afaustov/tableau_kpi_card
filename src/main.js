@@ -1136,9 +1136,9 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods, session
 
           // Re-render with both current and reference data
           if (card.chartType === 'line') {
-            renderLineChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, false);
+            renderLineChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, true);
           } else {
-            renderBarChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, false);
+            renderBarChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, true);
           }
 
           // Update cache
@@ -1802,6 +1802,7 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
   allRefBars
     .attr('data-index', (d, i) => i)
     .transition().duration(shouldAnimate ? 400 : 0)
+    .delay((d, i) => shouldAnimate ? i * 20 : 0) // Staggered animation
     .attr('x', d => x(d.date))
     .attr('width', x.bandwidth())
     .attr('y', (d, i) => {
@@ -1839,6 +1840,7 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     })
     .transition().duration(shouldAnimate ? 400 : 0)
     .ease(d3.easeQuadOut)
+    .delay((d, i) => shouldAnimate ? i * 20 : 0) // Staggered animation
     .attr('x', d => x(d.date) + x.bandwidth() * 0.25)
     .attr('width', x.bandwidth() * 0.5)
     .attr('y', d => y(d.value))
