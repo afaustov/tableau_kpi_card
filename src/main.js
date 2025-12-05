@@ -748,16 +748,21 @@ async function refreshKPIs(worksheet) {
     // Lazy load charts in background (pass sessionId for cancellation check)
     loadChartsAsync(worksheet, dateFieldName, cards, periods, sessionId);
 
-    // Update state hash after successful refresh
-    const newHash = await computeStateHash(worksheet);
-    state.lastStateHash = newHash;
-    state.lastSpecHash = newHash; // Update polling hash to prevent infinite loop
-
   } catch (e) {
     // showDebug('Refresh Error: ' + e.message);
   } finally {
     state.isCalculating = false;
     state.isApplyingOwnFilters = false;
+
+    // Update state hash after flags are reset to prevent race condition with polling
+    try {
+      const newHash = await computeStateHash(worksheet);
+      state.lastStateHash = newHash;
+      state.lastSpecHash = newHash; // Update polling hash to prevent infinite loop
+    } catch (e) {
+      // Ignore hash computation errors
+    }
+
     // Restore listener
     if (!state.unregisterDataHandler && state.handleDataChange) {
       state.unregisterDataHandler = worksheet.addEventListener(
