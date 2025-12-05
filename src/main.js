@@ -490,6 +490,7 @@ async function refreshKPIs(worksheet) {
   // If already calculating, we still continue - we've invalidated the old session
   state.isCalculating = true;
   state.isApplyingOwnFilters = true;
+  state.orderedDetailKeys = []; // Clear ordered keys to prevent stale cards
 
   // Unregister listener temporarily
   if (state.unregisterDataHandler) {
