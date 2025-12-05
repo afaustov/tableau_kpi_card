@@ -465,8 +465,6 @@ async function refreshKPIs(worksheet) {
   state.isCalculating = true;
   state.isApplyingOwnFilters = true;
 
-  document.getElementById('kpi-container').innerHTML = '<div class="loading">Calculating...</div>';
-
   // Unregister listener temporarily
   if (state.unregisterDataHandler) {
     state.unregisterDataHandler();
