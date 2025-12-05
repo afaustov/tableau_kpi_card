@@ -306,9 +306,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // This is needed because SummaryDataChanged doesn't always fire for Detail changes
     state.lastSpecHash = await computeStateHash(worksheet);
     const checkSpecChanges = async () => {
+      // REMOVED GUARD: We need to detect user changes even if we are calculating!
+      // The hash computation excludes our own temp filters, so it is safe.
+      /*
       if (state.isApplyingOwnFilters || state.isCalculating) {
         return;
       }
+      */
 
       try {
         const currentSpecHash = await computeStateHash(worksheet);
