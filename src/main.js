@@ -18,7 +18,8 @@ let state = {
   chartCache: {}, // Cache for chart data to avoid re-fetching
   currentSessionId: 0, // Session ID for cancellation mechanism
   specCheckInterval: null, // Interval for polling visual spec changes
-  lastSpecHash: null // Last visual spec hash for change detection
+  lastSpecHash: null, // Last visual spec hash for change detection
+  ignoreEventsUntil: 0 // Timestamp to ignore events until (grace period)
 };
 
 // Helper function to check if the current session is still valid
@@ -259,8 +260,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Listen for data changes with debounce and filter check
     let resizeTimer;
     const handleDataChange = async () => {
-      // Ignore events triggered by our own filter changes
-      if (state.isApplyingOwnFilters) {
+      // Ignore events triggered by our own filter changes or during grace period
+      if (state.isApplyingOwnFilters || Date.now() < state.ignoreEventsUntil) {
         return;
       }
 
@@ -284,7 +285,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Also listen for filter changes explicitly
     const handleFilterChange = async () => {
-      if (state.isApplyingOwnFilters) {
+      if (state.isApplyingOwnFilters || Date.now() < state.ignoreEventsUntil) {
         return;
       }
 
@@ -308,18 +309,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const checkSpecChanges = async () => {
       // REMOVED GUARD: We need to detect user changes even if we are calculating!
       // The hash computation excludes our own temp filters, so it is safe.
-      /*
-      if (state.isApplyingOwnFilters || state.isCalculating) {
+      if (state.isApplyingOwnFilters || state.isCalculating || Date.now() < state.ignoreEventsUntil) {
         return;
       }
-      */
 
       try {
         const currentSpecHash = await computeStateHash(worksheet);
         if (currentSpecHash !== state.lastSpecHash) {
           state.lastSpecHash = currentSpecHash;
           state.lastStateHash = null; // Force refresh
-          await refreshKPIs(worksheet);
+          await refreshKPIs(worksheet, 'spec-change');
         }
       } catch (e) {
         // Ignore errors in polling
@@ -331,7 +330,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.specCheckInterval = specCheckInterval;
 
     // Initial load
-    await refreshKPIs(worksheet);
+    await refreshKPIs(worksheet, 'init');
 
     // Right-click to reload data
     document.addEventListener('contextmenu', (e) => {
@@ -342,7 +341,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       menu.onclick = async () => {
         menu.remove();
         const worksheet = window.tableau.extensions.worksheetContent.worksheet;
-        await refreshKPIs(worksheet);
+        await refreshKPIs(worksheet, 'manual-reload');
       };
       document.body.appendChild(menu);
       setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 10);
@@ -382,14 +381,20 @@ async function checkForChanges(worksheet) {
 
 
 // Compute a hash of the current state (metrics, encodings, filters)
-async function computeStateHash(worksheet) {
+async function computeStateHash(worksheet, knownEncodings = null) {
   let hashParts = [];
 
   try {
     // 1. Get encodings (metrics and date fields)
-    if (typeof worksheet.getVisualSpecificationAsync === 'function') {
+    let encodings = [];
+    if (knownEncodings) {
+      encodings = knownEncodings;
+    } else if (typeof worksheet.getVisualSpecificationAsync === 'function') {
       const spec = await worksheet.getVisualSpecificationAsync();
-      const encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
+      encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
+    }
+
+    if (encodings.length > 0) {
 
       // Extract fields from new encodings
       const orderedEncodings = encodings
@@ -434,10 +439,10 @@ async function computeStateHash(worksheet) {
 
     // Get date field name to exclude it from filter hash
     let dateFieldToExclude = null;
-    if (typeof worksheet.getVisualSpecificationAsync === 'function') {
+
+    // Use the same encodings logic for date field exclusion
+    if (encodings.length > 0) {
       try {
-        const spec = await worksheet.getVisualSpecificationAsync();
-        const encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
         const dateFields = encodings
           .filter(e => e.id === 'date')
           .map(e => e.field?.name || e.field || e.fieldName)
@@ -446,6 +451,17 @@ async function computeStateHash(worksheet) {
       } catch (e) {
         // Ignore
       }
+    } else if (typeof worksheet.getVisualSpecificationAsync === 'function' && !knownEncodings) {
+      // Fallback if we didn't have encodings above (shouldn't happen if logic matches)
+      try {
+        const spec = await worksheet.getVisualSpecificationAsync();
+        const freshEncodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
+        const dateFields = freshEncodings
+          .filter(e => e.id === 'date')
+          .map(e => e.field?.name || e.field || e.fieldName)
+          .filter(Boolean);
+        dateFieldToExclude = dateFields[0] || null;
+      } catch (e) { }
     }
 
     const filterHash = filters
@@ -482,7 +498,7 @@ async function computeStateHash(worksheet) {
   }
 }
 
-async function refreshKPIs(worksheet) {
+async function refreshKPIs(worksheet, trigger = 'unknown') {
   // Increment session ID to cancel any in-progress operations
   state.currentSessionId++;
   const sessionId = state.currentSessionId;
@@ -502,10 +518,12 @@ async function refreshKPIs(worksheet) {
     // 1. Get Encodings
     let metricFields = [];
     let dateFieldName = null;
+    let rawEncodings = null; // Capture for hash computation
 
     if (typeof worksheet.getVisualSpecificationAsync === 'function') {
       const spec = await worksheet.getVisualSpecificationAsync();
       const encodings = (spec.marksSpecifications && spec.marksSpecifications[0]?.encodings) || [];
+      rawEncodings = encodings;
 
       // showDebug(`🔍 Encodings: ${encodings.length} found`);
 
@@ -530,7 +548,7 @@ async function refreshKPIs(worksheet) {
         document.body.appendChild(debugEl);
       }
       debugEl.innerHTML = `
-        Session: ${sessionId}<br>
+        Session: ${sessionId} (${trigger})<br>
         Details: ${JSON.stringify(detailFields)}<br>
         Metrics: ${metricFields.length}<br>
         Hash: ${state.lastSpecHash ? state.lastSpecHash.substring(0, 20) + '...' : 'null'}
@@ -563,7 +581,6 @@ async function refreshKPIs(worksheet) {
       // Store encoding info in state for later use
       state.encodings = { barsFields, linesFields, unfavorableFields, tooltipFields, detailFields, orderedMetrics };
     }
-
     if (!dateFieldName) {
       const filters = await worksheet.getFiltersAsync();
       const dateFilter = filters.find(f => f.columnType === 'continuous-date' || f.columnType === 'discrete-date' || f.fieldName.toLowerCase().includes('date'));
@@ -808,21 +825,23 @@ async function refreshKPIs(worksheet) {
       });
     }
 
-    // Render KPIs immediately with skeleton charts
-    renderKPIs(cards, true); // true = show skeleton
+    // Render KPIs immediately without skeleton (user request)
+    renderKPIs(cards, false);
 
     // Lazy load charts in background (pass sessionId for cancellation check)
-    loadChartsAsync(worksheet, dateFieldName, cards, periods, sessionId);
+    await loadChartsAsync(worksheet, dateFieldName, cards, periods, sessionId);
 
   } catch (e) {
     // showDebug('Refresh Error: ' + e.message);
   } finally {
     state.isCalculating = false;
     state.isApplyingOwnFilters = false;
+    state.ignoreEventsUntil = Date.now() + 3000; // Ignore events for 3s after refresh to catch trailing Tableau events
 
     // Update state hash after flags are reset to prevent race condition with polling
     try {
-      const newHash = await computeStateHash(worksheet);
+      // Pass rawEncodings to ensure hash matches what we just rendered, avoiding flaky API calls
+      const newHash = await computeStateHash(worksheet, rawEncodings);
       state.lastStateHash = newHash;
       state.lastSpecHash = newHash; // Update polling hash to prevent infinite loop
     } catch (e) {
@@ -1018,7 +1037,7 @@ function renderSkeletonLineChart(elementId) {
 // Lazy load charts (bars and lines) in background
 async function loadChartsAsync(worksheet, dateFieldName, cards, periods, sessionId) {
   // Set flag to prevent SummaryDataChanged events during chart loading from triggering refresh
-  state.isApplyingOwnFilters = true;
+  // state.isApplyingOwnFilters = true; // Managed by refreshKPIs now
 
   try {
     for (const card of cards) {
@@ -1128,7 +1147,7 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods, session
     }
   } finally {
     // Reset flag after all chart loading is complete
-    state.isApplyingOwnFilters = false;
+    // state.isApplyingOwnFilters = false; // Managed by refreshKPIs now
   }
 }
 
