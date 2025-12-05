@@ -1472,21 +1472,40 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       .text(formatDate(endDate));
   }
 
-  barEl.addEventListener('mouseenter', (e) => {
-    showTooltipForBar(e, d.date, currentVal, referenceVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
-    barEl.classList.add('active');
-  });
+  // Attach interaction
+  attachBarHoverInteraction(container, currentData, referenceData, metricName, isPercentage, isUnfavorable, tooltipFields, true);
+}
 
-  barEl.addEventListener('mouseleave', () => {
-    hideTooltip();
-    barEl.classList.remove('active');
-  });
+function attachBarHoverInteraction(containerEl, data, referenceData, metricName, isPct, isUnfavorable, tooltipFields = [], hasCurrent = true) {
+  const currentBars = containerEl.querySelectorAll('.bar-current');
+  const refBars = containerEl.querySelectorAll('.bar-ref');
 
-  barEl.addEventListener('mousemove', (e) => {
-    lastEvent = e;
-    updateTooltipPosition();
+  data.forEach((d, i) => {
+    let barEl = currentBars[i] || refBars[i];
+
+    if (!barEl) return;
+
+    const refVal = referenceData ? (referenceData[i]?.value || 0) : 0;
+    const currentVal = hasCurrent ? d.value : 0;
+    const referenceVal = hasCurrent ? refVal : d.value;
+
+    barEl.style.cursor = 'pointer';
+
+    barEl.addEventListener('mouseenter', (e) => {
+      showTooltipForBar(e, d.date, currentVal, referenceVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
+      barEl.classList.add('active');
+    });
+
+    barEl.addEventListener('mouseleave', () => {
+      hideTooltip();
+      barEl.classList.remove('active');
+    });
+
+    barEl.addEventListener('mousemove', (e) => {
+      lastEvent = e;
+      updateTooltipPosition();
+    });
   });
-});
 }
 
 // Render line chart for metric
