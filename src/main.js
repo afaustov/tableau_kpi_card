@@ -520,6 +520,21 @@ async function refreshKPIs(worksheet) {
       const tooltipFields = getFieldNames('tooltip');
       const detailFields = getFieldNames('detail'); // Standard Tableau Detail shelf
 
+      // DEBUG OVERLAY
+      let debugEl = document.getElementById('debug-overlay');
+      if (!debugEl) {
+        debugEl = document.createElement('div');
+        debugEl.id = 'debug-overlay';
+        debugEl.style = 'position:fixed; bottom:10px; right:10px; background:rgba(0,0,0,0.8); color:lime; padding:10px; font-size:12px; z-index:9999; pointer-events:none;';
+        document.body.appendChild(debugEl);
+      }
+      debugEl.innerHTML = `
+        Session: ${sessionId}<br>
+        Details: ${JSON.stringify(detailFields)}<br>
+        Metrics: ${metricFields.length}<br>
+        Hash: ${state.lastSpecHash ? state.lastSpecHash.substring(0, 20) + '...' : 'null'}
+      `;
+
       // Create ordered metrics list
       const orderedMetrics = [];
       encodings.forEach(e => {
