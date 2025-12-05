@@ -217,12 +217,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       updateControlsVisibility();
       updateSelectorDisplay();
       state.lastStateHash = null;
+      state.chartCache = {}; // Clear cache on period/granularity change
       refreshKPIs(worksheet);
     });
 
     document.getElementById('week-start-select').addEventListener('change', e => {
       state.weekStart = e.target.value;
       state.lastStateHash = null;
+      state.chartCache = {}; // Clear cache on week start change
       refreshKPIs(worksheet);
     });
 
@@ -245,6 +247,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     rollingInput.addEventListener('change', () => {
       state.lastStateHash = null;
+      state.chartCache = {}; // Clear cache on rolling count change
       refreshKPIs(worksheet);
     });
 
@@ -457,9 +460,6 @@ async function refreshKPIs(worksheet) {
   // Increment session ID to cancel any in-progress operations
   state.currentSessionId++;
   const sessionId = state.currentSessionId;
-
-  // Clear chart cache on new refresh to force re-fetch
-  state.chartCache = {};
 
   // If already calculating, we still continue - we've invalidated the old session
   state.isCalculating = true;
