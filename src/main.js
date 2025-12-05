@@ -302,6 +302,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     );
     state.handleFilterChange = handleFilterChange;
 
+    // Polling for visual specification changes (Details, metrics, encodings)
+    // This is needed because SummaryDataChanged doesn't always fire for Detail changes
+    state.lastSpecHash = await computeStateHash(worksheet);
+    const checkSpecChanges = async () => {
+      if (state.isApplyingOwnFilters || state.isCalculating) {
+        return;
+      }
+
+      try {
+        const currentSpecHash = await computeStateHash(worksheet);
+        if (currentSpecHash !== state.lastSpecHash) {
+          state.lastSpecHash = currentSpecHash;
+          state.lastStateHash = null; // Force refresh
+          await refreshKPIs(worksheet);
+        }
+      } catch (e) {
+        // Ignore errors in polling
+      }
+    };
+
+    // Check for spec changes every 2 seconds
+    const specCheckInterval = setInterval(checkSpecChanges, 2000);
+    state.specCheckInterval = specCheckInterval;
+
     // Initial load
     await refreshKPIs(worksheet);
 
@@ -1042,9 +1066,9 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods, session
 
           // Render reference period first (pass empty array for current)
           if (card.chartType === 'line') {
-            renderLineChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+            renderLineChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, true);
           } else {
-            renderBarChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+            renderBarChart(chartId, [], chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, true);
           }
 
           // Fetch chart data for CURRENT period
@@ -1065,9 +1089,9 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods, session
 
           // Re-render with both current and reference data
           if (card.chartType === 'line') {
-            renderLineChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+            renderLineChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, false);
           } else {
-            renderBarChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields);
+            renderBarChart(chartId, chartDataCurrent, chartDataReference, subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, false);
           }
 
           // Update cache
@@ -1664,7 +1688,7 @@ async function fetchBarChartData(worksheet, dateFieldName, metricField, range, t
   }
 }
 
-function renderBarChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable, tooltipFields = []) {
+function renderBarChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable, tooltipFields = [], shouldAnimate = true) {
   const container = document.getElementById(elementId);
   if (!container) return;
 
@@ -1759,7 +1783,7 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
         return isGood ? '#4f46e5' : '#ef4444';
       })
       .transition()
-      .duration(400)
+      .duration(shouldAnimate ? 400 : 0)
       .ease(d3.easeQuadOut)
       .attr('y', d => y(d.value))
       .attr('height', d => y(0) - y(d.value));
@@ -1841,7 +1865,7 @@ function attachBarHoverInteraction(containerEl, data, referenceData, metricName,
 }
 
 // Render line chart for metric
-function renderLineChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable, tooltipFields = []) {
+function renderLineChart(elementId, currentData, referenceData, metricName, dateFieldName, isPercentage, isUnfavorable, tooltipFields = [], shouldAnimate = true) {
   const container = document.getElementById(elementId);
   if (!container) return;
 
@@ -1953,7 +1977,7 @@ function renderLineChart(elementId, currentData, referenceData, metricName, date
       .attr('stroke-dasharray', totalLength + ' ' + totalLength)
       .attr('stroke-dashoffset', totalLength)
       .transition()
-      .duration(800)
+      .duration(shouldAnimate ? 800 : 0)
       .ease(d3.easeQuadOut)
       .attr('stroke-dashoffset', 0);
 
