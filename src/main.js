@@ -1087,7 +1087,15 @@ async function loadChartsAsync(worksheet, dateFieldName, cards, periods, session
             }
           }
         } else {
-          // Progressive loading: Fetch and render REFERENCE period first (gray bars)
+          // Progressive loading:
+          // 1. Render empty chart container immediately
+          if (card.chartType === 'line') {
+            renderLineChart(chartId, [], [], subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, true);
+          } else {
+            renderBarChart(chartId, [], [], subtitleText, dateFieldName, card.isPercentage, card.isUnfavorable, card.tooltipFields, true);
+          }
+
+          // 2. Fetch and render REFERENCE period (gray bars)
           chartDataReference = await fetchChartDataByGranularity(
             worksheet,
             dateFieldName,
@@ -1731,36 +1739,31 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
   const container = document.getElementById(elementId);
   if (!container) return;
 
-  // Clear previous chart
-  container.innerHTML = '';
-
-  // Use ResizeObserver to handle responsiveness
-  if (!container._resizeObserver) {
-    container._resizeObserver = new ResizeObserver(entries => {
-      // Placeholder for resize logic if needed
-    });
-  }
-
   const width = container.clientWidth;
   const height = container.clientHeight || 150;
   const margin = { top: 5, right: 0, bottom: 20, left: 0 };
 
-  const svg = d3.select(container)
-    .append('svg')
-    .attr('width', '100%')
-    .attr('height', '100%')
-    .attr('viewBox', `0 0 ${width} ${height}`)
-    .attr('preserveAspectRatio', 'xMidYMid meet');
+  // Select or create SVG
+  let svg = d3.select(container).select('svg');
+  if (svg.empty()) {
+    svg = d3.select(container)
+      .append('svg')
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('viewBox', `0 0 ${width} ${height}`)
+      .attr('preserveAspectRatio', 'xMidYMid meet');
+  } else {
+    svg.attr('viewBox', `0 0 ${width} ${height}`);
+  }
 
   const hasCurrent = currentData && currentData.length > 0;
   const hasRef = referenceData && referenceData.length > 0;
-
-  // Determine which dataset drives the X-axis
-  // If we have current data, use it (and overlay reference on top)
-  // If we only have reference data (loading state), use reference
   const primaryData = hasCurrent ? currentData : (hasRef ? referenceData : []);
 
-  if (primaryData.length === 0) return;
+  if (primaryData.length === 0) {
+    svg.selectAll('*').remove();
+    return;
+  }
 
   // X scale
   const x = d3.scaleBand()
@@ -1778,63 +1781,78 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
     .domain([0, maxVal])
     .range([height - margin.bottom, margin.top]);
 
-  // Draw Reference Bars (Gray) - Full Width
-  if (hasRef) {
-    // If we have current data, we map reference data to current dates by index
-    // If we don't have current data, we just draw reference data as is
-    const refSource = hasCurrent ? currentData : referenceData;
+  // --- Reference Bars (Gray) ---
+  const refSource = hasCurrent ? currentData : referenceData;
+  const refBars = svg.selectAll('.bar-ref')
+    .data(hasRef ? refSource : []);
 
-    svg.selectAll('.bar-ref')
-      .data(refSource)
-      .enter()
-      .append('rect')
-      .attr('class', 'bar-ref')
-      .attr('x', d => x(d.date))
-      .attr('width', x.bandwidth())
-      .attr('y', (d, i) => {
-        // If overlaying, get value from referenceData by index
-        // If standalone, get value from d (which is referenceData item)
-        const val = hasCurrent ? (referenceData[i]?.value || 0) : d.value;
-        return y(val);
-      })
-      .attr('height', (d, i) => {
-        const val = hasCurrent ? (referenceData[i]?.value || 0) : d.value;
-        return y(0) - y(val);
-      })
-      .attr('fill', '#e2e8f0');
-  }
+  refBars.exit().remove();
 
-  // Draw Current Bars (Conditional Color) - Half Width & Centered
-  if (hasCurrent) {
-    svg.selectAll('.bar-current')
-      .data(currentData)
-      .enter()
-      .append('rect')
-      .attr('class', 'bar-current')
-      .attr('x', d => x(d.date) + x.bandwidth() * 0.25)
-      .attr('width', x.bandwidth() * 0.5)
-      .attr('y', y(0))
-      .attr('height', 0)
-      .attr('fill', (d, i) => {
-        const refVal = referenceData?.[i]?.value || 0;
-        const isGrowth = d.value > refVal;
-        const isGood = isUnfavorable ? !isGrowth : isGrowth;
-        return isGood ? '#4f46e5' : '#ef4444';
-      })
-      .transition()
-      .duration(shouldAnimate ? 400 : 0)
-      .ease(d3.easeQuadOut)
-      .attr('y', d => y(d.value))
-      .attr('height', d => y(0) - y(d.value));
-  }
+  const refBarsEnter = refBars.enter()
+    .append('rect')
+    .attr('class', 'bar-ref')
+    .attr('fill', '#e2e8f0')
+    .attr('x', d => x(d.date))
+    .attr('width', x.bandwidth())
+    .attr('y', y(0))
+    .attr('height', 0);
 
-  // Axis Labels (Start and End Date)
+  const allRefBars = refBarsEnter.merge(refBars);
+
+  allRefBars
+    .attr('data-index', (d, i) => i)
+    .transition().duration(shouldAnimate ? 400 : 0)
+    .attr('x', d => x(d.date))
+    .attr('width', x.bandwidth())
+    .attr('y', (d, i) => {
+      const val = hasCurrent ? (referenceData[i]?.value || 0) : d.value;
+      return y(val);
+    })
+    .attr('height', (d, i) => {
+      const val = hasCurrent ? (referenceData[i]?.value || 0) : d.value;
+      return y(0) - y(val);
+    });
+
+  // --- Current Bars (Colored) ---
+  const curBars = svg.selectAll('.bar-current')
+    .data(hasCurrent ? currentData : []);
+
+  curBars.exit().remove();
+
+  const curBarsEnter = curBars.enter()
+    .append('rect')
+    .attr('class', 'bar-current')
+    .attr('x', d => x(d.date) + x.bandwidth() * 0.25)
+    .attr('width', x.bandwidth() * 0.5)
+    .attr('y', y(0))
+    .attr('height', 0);
+
+  const allCurBars = curBarsEnter.merge(curBars);
+
+  allCurBars
+    .attr('data-index', (d, i) => i)
+    .attr('fill', (d, i) => {
+      const refVal = referenceData?.[i]?.value || 0;
+      const isGrowth = d.value > refVal;
+      const isGood = isUnfavorable ? !isGrowth : isGrowth;
+      return isGood ? '#4f46e5' : '#ef4444';
+    })
+    .transition().duration(shouldAnimate ? 400 : 0)
+    .ease(d3.easeQuadOut)
+    .attr('x', d => x(d.date) + x.bandwidth() * 0.25)
+    .attr('width', x.bandwidth() * 0.5)
+    .attr('y', d => y(d.value))
+    .attr('height', d => y(0) - y(d.value));
+
+  // --- Axis Labels ---
+  svg.selectAll('.axis-label').remove();
   if (primaryData.length > 0) {
     const startDate = primaryData[0].date;
     const endDate = primaryData[primaryData.length - 1].date;
     const formatDate = d3.timeFormat('%b %d');
 
     svg.append('text')
+      .attr('class', 'axis-label')
       .attr('x', 0)
       .attr('y', height - 5)
       .attr('font-size', '10px')
@@ -1842,6 +1860,7 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       .text(formatDate(startDate));
 
     svg.append('text')
+      .attr('class', 'axis-label')
       .attr('x', width)
       .attr('y', height - 5)
       .attr('text-anchor', 'end')
@@ -1850,57 +1869,55 @@ function renderBarChart(elementId, currentData, referenceData, metricName, dateF
       .text(formatDate(endDate));
   }
 
-  // Attach interaction
-  attachBarHoverInteraction(container, currentData, referenceData, metricName, isPercentage, isUnfavorable, tooltipFields, true);
-}
+  // --- Interaction ---
+  const handleHover = function (event, d) {
+    const i = +d3.select(this).attr('data-index');
+    const refVal = referenceData ? (referenceData[i]?.value || 0) : 0;
+    const currentVal = hasCurrent ? (currentData[i]?.value || 0) : 0;
+    // If hovering ref bar but no current data, use ref value as current for tooltip context?
+    // Or just show what we have.
+    // Logic from attachBarHoverInteraction:
+    // const currentVal = hasCurrent ? d.value : 0; (if d is current)
+    // const referenceVal = hasCurrent ? refVal : d.value; (if d is ref)
 
-function attachBarHoverInteraction(containerEl, data, referenceData, metricName, isPct, isUnfavorable, tooltipFields = [], hasCurrent = true) {
-  const currentBars = containerEl.querySelectorAll('.bar-current');
-  const refBars = containerEl.querySelectorAll('.bar-ref');
+    // Simplified: we have index i.
+    // If hasCurrent, d is from currentData (for curBar) or mapped (for refBar).
+    // Let's rely on the index to get values from the source arrays.
+    const cVal = hasCurrent ? currentData[i].value : 0;
+    const rVal = hasRef ? referenceData[i].value : 0;
+    const date = hasCurrent ? currentData[i].date : referenceData[i].date;
+    const tValues = hasCurrent ? currentData[i].tooltipValues : referenceData[i].tooltipValues;
 
-  // Helper function to attach events to a bar element
-  const attachEventsToBar = (barEl, d, i, currentVal, referenceVal) => {
-    if (!barEl) return;
+    showTooltipForBar(event, date, cVal, rVal, metricName, isPercentage, isUnfavorable, tooltipFields, tValues);
 
-    barEl.style.cursor = 'pointer';
-
-    barEl.addEventListener('mouseenter', (e) => {
-      showTooltipForBar(e, d.date, currentVal, referenceVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
-      barEl.classList.add('active');
-      // Also highlight the paired bar if it exists
-      if (currentBars[i]) currentBars[i].classList.add('active');
-      if (refBars[i]) refBars[i].classList.add('active');
-    });
-
-    barEl.addEventListener('mouseleave', () => {
-      hideTooltip();
-      barEl.classList.remove('active');
-      // Remove highlight from paired bar
-      if (currentBars[i]) currentBars[i].classList.remove('active');
-      if (refBars[i]) refBars[i].classList.remove('active');
-    });
-
-    barEl.addEventListener('mousemove', (e) => {
-      lastEvent = e;
-      updateTooltipPosition();
-    });
+    // Highlight paired bars
+    svg.selectAll(`.bar-ref[data-index="${i}"]`).classed('active', true);
+    svg.selectAll(`.bar-current[data-index="${i}"]`).classed('active', true);
   };
 
-  data.forEach((d, i) => {
-    const refVal = referenceData ? (referenceData[i]?.value || 0) : 0;
-    const currentVal = hasCurrent ? d.value : 0;
-    const referenceVal = hasCurrent ? refVal : d.value;
+  const handleLeave = function (event, d) {
+    hideTooltip();
+    const i = +d3.select(this).attr('data-index');
+    svg.selectAll(`.bar-ref[data-index="${i}"]`).classed('active', false);
+    svg.selectAll(`.bar-current[data-index="${i}"]`).classed('active', false);
+  };
 
-    // Attach events to current bar
-    if (currentBars[i]) {
-      attachEventsToBar(currentBars[i], d, i, currentVal, referenceVal);
-    }
+  const handleMove = function (event) {
+    lastEvent = event;
+    updateTooltipPosition();
+  };
 
-    // Attach events to reference bar (make it interactive too)
-    if (refBars[i]) {
-      attachEventsToBar(refBars[i], d, i, currentVal, referenceVal);
-    }
-  });
+  allRefBars
+    .style('cursor', 'pointer')
+    .on('mouseenter', handleHover)
+    .on('mouseleave', handleLeave)
+    .on('mousemove', handleMove);
+
+  allCurBars
+    .style('cursor', 'pointer')
+    .on('mouseenter', handleHover)
+    .on('mouseleave', handleLeave)
+    .on('mousemove', handleMove);
 }
 
 // Render line chart for metric
