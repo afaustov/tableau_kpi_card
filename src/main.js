@@ -1480,31 +1480,48 @@ function attachBarHoverInteraction(containerEl, data, referenceData, metricName,
   const currentBars = containerEl.querySelectorAll('.bar-current');
   const refBars = containerEl.querySelectorAll('.bar-ref');
 
-  data.forEach((d, i) => {
-    let barEl = currentBars[i] || refBars[i];
-
+  // Helper function to attach events to a bar element
+  const attachEventsToBar = (barEl, d, i, currentVal, referenceVal) => {
     if (!barEl) return;
-
-    const refVal = referenceData ? (referenceData[i]?.value || 0) : 0;
-    const currentVal = hasCurrent ? d.value : 0;
-    const referenceVal = hasCurrent ? refVal : d.value;
 
     barEl.style.cursor = 'pointer';
 
     barEl.addEventListener('mouseenter', (e) => {
       showTooltipForBar(e, d.date, currentVal, referenceVal, metricName, isPct, isUnfavorable, tooltipFields, d.tooltipValues);
       barEl.classList.add('active');
+      // Also highlight the paired bar if it exists
+      if (currentBars[i]) currentBars[i].classList.add('active');
+      if (refBars[i]) refBars[i].classList.add('active');
     });
 
     barEl.addEventListener('mouseleave', () => {
       hideTooltip();
       barEl.classList.remove('active');
+      // Remove highlight from paired bar
+      if (currentBars[i]) currentBars[i].classList.remove('active');
+      if (refBars[i]) refBars[i].classList.remove('active');
     });
 
     barEl.addEventListener('mousemove', (e) => {
       lastEvent = e;
       updateTooltipPosition();
     });
+  };
+
+  data.forEach((d, i) => {
+    const refVal = referenceData ? (referenceData[i]?.value || 0) : 0;
+    const currentVal = hasCurrent ? d.value : 0;
+    const referenceVal = hasCurrent ? refVal : d.value;
+
+    // Attach events to current bar
+    if (currentBars[i]) {
+      attachEventsToBar(currentBars[i], d, i, currentVal, referenceVal);
+    }
+
+    // Attach events to reference bar (make it interactive too)
+    if (refBars[i]) {
+      attachEventsToBar(refBars[i], d, i, currentVal, referenceVal);
+    }
   });
 }
 
