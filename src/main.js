@@ -33,6 +33,28 @@ const rollingDefaults = {
   years: 4
 };
 
+// Aggregation types that can be pre-aggregated (one query for all periods)
+// SUM, COUNT, MIN, MAX can be aggregated from pre-aggregated data
+// COUNTD, AVG, ATTR, MEDIAN etc. cannot be pre-aggregated
+const PREAGGREGATABLE_FUNCTIONS = ['SUM', 'CNT', 'COUNT', 'MIN', 'MAX'];
+
+// Helper function to extract aggregation type from field name
+// Tableau field names look like: "SUM(Sales)", "AVG(Profit)", "COUNTD(Customer ID)"
+function getAggregationType(fieldName) {
+  if (!fieldName) return null;
+  const match = fieldName.match(/^([A-Z]+)\s*\(/i);
+  if (match) {
+    return match[1].toUpperCase();
+  }
+  return null;
+}
+
+// Check if a field can be pre-aggregated
+function canPreaggregate(fieldName) {
+  const aggType = getAggregationType(fieldName);
+  return aggType && PREAGGREGATABLE_FUNCTIONS.includes(aggType);
+}
+
 // Update the custom selector display text
 function updateSelectorDisplay() {
   const select = document.getElementById('period-granularity-select');
@@ -981,11 +1003,173 @@ async function fetchChartDataByGranularity(worksheet, dateFieldName, metricField
   if (granularity === 'days') {
     return await fetchBarChartData(worksheet, dateFieldName, metricField, range, tooltipFields, detailKey);
   } else {
-    return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey);
+    // Check if metric can be pre-aggregated (SUM, CNT, MIN, MAX)
+    // For these, we fetch all data in one query and aggregate locally
+    if (canPreaggregate(metricField)) {
+      return await fetchPreaggregatableChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey);
+    } else {
+      // For CNTD, AVG, AGG etc. - use separate queries per period (slower but accurate)
+      return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey);
+    }
   }
 }
 
-// Fetch aggregated data for weeks/months/quarters/years
+// Optimized fetch for pre-aggregatable functions (SUM, CNT, MIN, MAX)
+// Fetches all data in ONE query and aggregates locally by period
+async function fetchPreaggregatableChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], granularity, detailKey = '') {
+  try {
+    const periods = generatePeriods(range.start, range.end, granularity);
+    const detailFields = state.encodings?.detailFields || [];
+    const aggType = getAggregationType(metricField);
+
+    // Single query for the entire range
+    await worksheet.applyRangeFilterAsync(dateFieldName, {
+      min: range.start,
+      max: range.end
+    });
+
+    const summary = await worksheet.getSummaryDataAsync({ ignoreSelection: true });
+    const dateIndex = summary.columns.findIndex(c => c.fieldName === dateFieldName);
+    const metricIndex = summary.columns.findIndex(c => c.fieldName === metricField);
+
+    // If date column is not available, fall back to slow method
+    if (dateIndex === -1 || metricIndex === -1) {
+      await worksheet.clearFilterAsync(dateFieldName);
+      return await fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields, granularity, detailKey);
+    }
+
+    // Find indices for detail fields
+    const detailColIndices = {};
+    detailFields.forEach(dName => {
+      const idx = summary.columns.findIndex(c => c.fieldName === dName);
+      if (idx !== -1) detailColIndices[dName] = idx;
+    });
+
+    // Find indices for tooltip fields
+    const tooltipIndices = tooltipFields.map(tf => ({
+      name: tf,
+      index: summary.columns.findIndex(c => c.fieldName === tf),
+      aggType: getAggregationType(tf) // Get aggregation type for tooltip fields too
+    }));
+
+    // Initialize period buckets
+    const periodBuckets = periods.map(period => ({
+      period,
+      values: [],
+      tooltipValues: {}
+    }));
+
+    // Initialize tooltip accumulators for each period
+    periodBuckets.forEach(bucket => {
+      tooltipFields.forEach(tf => {
+        bucket.tooltipValues[tf] = { values: [], fmt: '' };
+      });
+    });
+
+    // Assign each row to appropriate period bucket
+    summary.data.forEach(row => {
+      // Filter by detailKey if specified
+      if (detailKey && detailFields.length > 0) {
+        const detailParts = [];
+        for (const dName of detailFields) {
+          const idx = detailColIndices[dName];
+          if (idx !== undefined) {
+            const val = row[idx].formattedValue || row[idx].nativeValue || '';
+            detailParts.push(String(val));
+          }
+        }
+        const rowDetailKey = detailParts.join(' | ');
+        if (rowDetailKey !== detailKey) return; // Skip rows that don't match
+      }
+
+      const rawDate = row[dateIndex].nativeValue;
+      if (!rawDate) return;
+      const rowDate = new Date(rawDate);
+
+      // Find which period this row belongs to
+      for (const bucket of periodBuckets) {
+        if (rowDate >= bucket.period.start && rowDate <= bucket.period.end) {
+          const val = row[metricIndex].nativeValue;
+          if (typeof val === 'number') {
+            bucket.values.push(val);
+          }
+
+          // Collect tooltip values
+          tooltipIndices.forEach(ti => {
+            if (ti.index === -1) return;
+            const cell = row[ti.index];
+            const tVal = cell.nativeValue;
+            const tFmt = cell.formattedValue;
+
+            if (typeof tVal === 'number') {
+              bucket.tooltipValues[ti.name].values.push(tVal);
+            }
+            if (!bucket.tooltipValues[ti.name].fmt && tFmt) {
+              bucket.tooltipValues[ti.name].fmt = tFmt;
+            }
+          });
+          break; // Row can only belong to one period
+        }
+      }
+    });
+
+    // Aggregate values per period based on aggregation type
+    const dataPoints = periodBuckets.map(bucket => {
+      let aggregatedValue = 0;
+      const values = bucket.values;
+
+      if (values.length > 0) {
+        if (aggType === 'SUM' || aggType === 'CNT' || aggType === 'COUNT') {
+          aggregatedValue = values.reduce((sum, v) => sum + v, 0);
+        } else if (aggType === 'MIN') {
+          aggregatedValue = Math.min(...values);
+        } else if (aggType === 'MAX') {
+          aggregatedValue = Math.max(...values);
+        }
+      }
+
+      // Aggregate tooltip values
+      const periodTooltipValues = {};
+      tooltipFields.forEach(tf => {
+        const tfData = bucket.tooltipValues[tf];
+        const tfAggType = getAggregationType(tf);
+        let tfAggValue = 0;
+
+        if (tfData.values.length > 0) {
+          if (tfAggType === 'SUM' || tfAggType === 'CNT' || tfAggType === 'COUNT' || !tfAggType) {
+            tfAggValue = tfData.values.reduce((sum, v) => sum + v, 0);
+          } else if (tfAggType === 'MIN') {
+            tfAggValue = Math.min(...tfData.values);
+          } else if (tfAggType === 'MAX') {
+            tfAggValue = Math.max(...tfData.values);
+          } else if (tfAggType === 'AVG') {
+            // For AVG in tooltips, we can approximate
+            tfAggValue = tfData.values.reduce((sum, v) => sum + v, 0) / tfData.values.length;
+          } else {
+            // Fallback to sum for unknown types
+            tfAggValue = tfData.values.reduce((sum, v) => sum + v, 0);
+          }
+        }
+
+        periodTooltipValues[tf] = { val: tfAggValue, fmt: tfData.fmt };
+      });
+
+      return {
+        date: new Date(bucket.period.start),
+        value: aggregatedValue,
+        tooltipValues: periodTooltipValues
+      };
+    });
+
+    await worksheet.clearFilterAsync(dateFieldName);
+    return dataPoints;
+
+  } catch (e) {
+    return [];
+  }
+}
+
+// Fetch aggregated data for weeks/months/quarters/years (SLOW - separate query per period)
 async function fetchAggregatedChartData(worksheet, dateFieldName, metricField, range, tooltipFields = [], granularity, detailKey = '') {
   try {
     const dataPoints = [];
